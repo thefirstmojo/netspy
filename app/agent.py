@@ -364,9 +364,19 @@ class Sampler:
                 e[0] += rate["rx"]
                 e[1] += rate["tx"]
 
+        # --- Summen (Uplink) — vor den Prozessen, für den physikalischen Cap ---
+        totals = {"rx": 0.0, "tx": 0.0}
+        for name, rate in iface_rates.items():
+            if rate["uplink"]:
+                totals["rx"] += rate["rx"]
+                totals["tx"] += rate["tx"]
+
         # --- Per-Prozess-Raten (TCP, roh) ---
         # Pro-Socket-Tracking über Inodes: verhindert Spikes, wenn ein Socket
         # zwischen Prozessen wandert (z. B. smbd Parent/Kind bei Fork).
+        # Zusätzlich dynamischer physikalischer Cap: kein Prozess kann schneller
+        # sein als die Gesamt-Uplink-Rate des Hosts in derselben Sekunde.
+        link_cap = totals["rx"] + totals["tx"]
         raw: dict = {}
         proc_cont: dict = {}
         if ss is not None:
@@ -376,11 +386,14 @@ class Sampler:
                     continue
                 drx = max(0.0, (s["rx"] - prev["rx"]) / dt)
                 dtx = max(0.0, (s["tx"] - prev["tx"]) / dt)
-                # Zähler-Artefakt-Guard (physikalisch unmögliche Raten)
+                # Zähler-Artefakt-Guard: physikalisch unmögliche Raten
                 if drx > RATE_CAP:
                     drx = 0.0
                 if dtx > RATE_CAP:
                     dtx = 0.0
+                if link_cap > 0:
+                    drx = min(drx, link_cap)
+                    dtx = min(dtx, link_cap)
                 if drx <= 0 and dtx <= 0:
                     continue
                 pid = s["pid"]
@@ -433,13 +446,7 @@ class Sampler:
         ]
         containers_list.sort(key=lambda c: c["rx"] + c["tx"], reverse=True)
 
-        # --- Summen + Rest (Kernel/UDP/ungenau), ebenfalls geglättet ---
-        totals = {"rx": 0.0, "tx": 0.0}
-        for name, rate in iface_rates.items():
-            if rate["uplink"]:
-                totals["rx"] += rate["rx"]
-                totals["tx"] += rate["tx"]
-
+        # --- Rest (Kernel/UDP/ungenau), ebenfalls geglättet ---
         proc_rx = sum(p["rx"] for p in procs_list)
         proc_tx = sum(p["tx"] for p in procs_list)
         cont_rx = sum(c["rx"] for c in containers_list)
