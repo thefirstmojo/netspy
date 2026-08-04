@@ -5,17 +5,19 @@
 #   Unraid (Dashboard + lokaler Sampler):
 #     ROLE=web
 #     SERVERS="Unraid=local;TrueNAS=http://10.10.10.100:8091"
-#     -> docker compose up -d --build
+#     -> docker compose up -d   (pullt ghcr.io/thefirstmojo/netspy:latest, public)
 #
 #   TrueNAS (nur Collector, via Portainer):
 #     ROLE=agent
 #     SERVERS=""
 #     -> Portainer: Stacks -> Add stack -> Repository (dieses Repo) -> Env-Vars setzen
+#
+#   Lokal bauen (nur für Entwicklung): docker build -t netspy:latest .
+#   und dann NETSPY_IMAGE=netspy:latest setzen.
 
 services:
   netspy:
-    build: .
-    image: ${NETSPY_IMAGE:-netspy:latest}
+    image: ${NETSPY_IMAGE:-ghcr.io/thefirstmojo/netspy:latest}
     container_name: ${NETSPY_CONTAINER:-netspy}
     restart: unless-stopped
 

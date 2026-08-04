@@ -29,7 +29,7 @@ Dashboard, wo die Verbindungen hingehen.
 ```bash
 git clone https://github.com/thefirstmojo/netspy.git && cd netspy
 cp .env.example .env                # ROLE=web, SERVERS anpassen
-docker compose up -d --build
+docker compose up -d                # pullt ghcr.io/thefirstmojo/netspy:latest (public)
 # UI: http://10.10.10.101:8090
 ```
 
@@ -50,11 +50,17 @@ docker compose up -d --build
 > den auskommentierten `volumes`-Block in der Compose aktivieren (auf
 > TrueNAS/Portainer weglassen).
 
-## Image statt Build (optional)
+## Lokal bauen (nur für Entwicklung)
 
-Nach `git tag v0.1 && git push --tags` baut GitHub Actions das Image und
-publiziert es auf `ghcr.io/<user>/netspy:latest`. Dann nur noch
-`NETSPY_IMAGE=ghcr.io/<user>/netspy:latest` setzen — kein `--build` nötig.
+Standard ist das **fertige GHCR-Image** (`ghcr.io/thefirstmojo/netspy:latest`,
+entsteht automatisch bei jedem `git tag vX.Y && git push --tags`). Wer lokal
+bauen will:
+
+```bash
+docker build -t netspy:latest .
+# in .env:  NETSPY_IMAGE=netspy:latest
+docker compose up -d
+```
 
 ## Funktionsweise
 
