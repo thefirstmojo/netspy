@@ -42,11 +42,13 @@ docker compose up -d --build
    - `AGENT_PORT=8091`
    - `UPLINK=br0`
    - `AGENT_TOKEN=<gleiches Token wie Unraid>`
-   - `DOCKER_SOCK`-Mount wird automatisch übersprungen (`optional: true`)
+   - Kein Docker-Socket-Mount nötig (Standard, funktioniert überall)
 4. Deploy → Test: `curl http://10.10.10.100:8091/api/metrics`
 
-> Falls die Compose-Version `optional: true` nicht kennt: Volumes-Block im
-> Portainer-Stack-Editor entfernen (Container-Namen gibt's auf TrueNAS eh nicht).
+> Der Docker-Socket-Mount ist standardmäßig deaktiviert, damit dieselbe
+> Compose-Datei auf jeder Version läuft. Für die Container-Namen auf Unraid:
+> den auskommentierten `volumes`-Block in der Compose aktivieren (auf
+> TrueNAS/Portainer weglassen).
 
 ## Image statt Build (optional)
 
@@ -87,7 +89,7 @@ publiziert es auf `ghcr.io/<user>/netspy:latest`. Dann nur noch
 
 - `pid: host` + Root ist nötig, um fremde PIDs zu lesen.
 - Abgemildert: `cap_drop: [ALL]`, nur `SYS_PTRACE` zusätzlich, Docker-Socket
-  read-only und optional gemountet.
+  read-only und nur auf Wunsch gemountet (Standard: ohne).
 - `AGENT_TOKEN` setzen, damit der Agent nicht offen im LAN hängt.
 
 ## Bekannte Grenzen (bewusst)

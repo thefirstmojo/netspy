@@ -36,13 +36,10 @@ services:
       AGENT_PORT: ${AGENT_PORT:-8091}
       AGENT_TOKEN: ${AGENT_TOKEN:-}
 
-    volumes:
-      # Nur auf Unraid vorhanden -> Prozess zu Container-Namen.
-      # optional: true = Mount wird übersprungen, wenn der Socket fehlt
-      # (z. B. auf TrueNAS). Bei sehr alten Compose-Versionen ohne
-      # optional-Support: diesen Block auf TrueNAS einfach löschen.
-      - type: bind
-        source: /var/run/docker.sock
-        target: /var/run/docker.sock
-        read_only: true
-        optional: true
+    # OPTIONAL — nur auf Unraid, wenn Prozess -> Container-Name gewünscht ist:
+    # Diese 3 Zeilen einkommentieren. (Alte Compose-Versionen kennen kein
+    # "optional: true", deshalb ist der Mount standardmaessig AUS — so
+    # funktioniert die Datei auf Unraid, TrueNAS und Portainer gleichermassen.)
+    # Auf TrueNAS NICHT aktivieren, dort existiert kein Docker-Socket.
+    # volumes:
+    #   - /var/run/docker.sock:/var/run/docker.sock:ro
