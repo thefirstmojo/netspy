@@ -108,7 +108,9 @@ function renderStatusbar(servers) {
     if (!badge) continue;
     const t = s.totals || { rx: 0, tx: 0 };
     badge.className = "badge " + (s.online ? "ok" : "bad");
-    badge.textContent = s.online ? "online · ▼ " + fmt(t.rx) + " ▲ " + fmt(t.tx) : "offline";
+    badge.innerHTML = s.online
+      ? `online · <span class="bn">▼ ${fmt(t.rx)}</span> <span class="bn">▲ ${fmt(t.tx)}</span>`
+      : "offline";
     const lg = document.querySelectorAll("#chart-" + s.name.replace(/[^a-zA-Z0-9]/g, "_") + " .chartlegend .lg");
     if (lg.length === 2) { lg[0].textContent = "▼ in " + fmt(t.rx); lg[1].textContent = "▲ out " + fmt(t.tx); }
   }
