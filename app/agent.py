@@ -509,6 +509,7 @@ class Sampler:
         with self.lock:
             if self._last is None:
                 return {
+                    "version": load_version(),
                     "hostname": socket.gethostname(),
                     "ts": time.time(),
                     "totals": {"rx": 0.0, "tx": 0.0},

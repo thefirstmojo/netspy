@@ -167,6 +167,7 @@ class Monitor:
                         "online": self.online.get(s["name"], False),
                         "error": self.errors.get(s["name"], ""),
                         "hostname": (self.snaps.get(s["name"]) or {}).get("hostname", ""),
+                        "version": (self.snaps.get(s["name"]) or {}).get("version", ""),
                         "totals": (self.snaps.get(s["name"]) or {}).get("totals",
                                                                         {"rx": 0.0, "tx": 0.0}),
                     }

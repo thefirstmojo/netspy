@@ -93,7 +93,7 @@ function renderStatusbar(servers) {
     const t = s.totals || { rx: 0, tx: 0 };
     return `<div class="stat ${on ? "online" : "offline"}">` +
       `<div class="dot"></div>` +
-      `<div class="statname">${esc(s.name)} <small>${esc(s.hostname || "")}</small></div>` +
+      `<div class="statname">${esc(s.name)} <small>${esc(s.hostname || "")} · v${esc(s.version || "?")}</small></div>` +
       `<div class="statnums"><span class="rx">▼ ${fmt(t.rx)}</span>` +
       `<span class="tx">▲ ${fmt(t.tx)}</span></div>` +
       (s.error ? `<div class="err" title="${esc(s.error)}">offline</div>` : "") +
