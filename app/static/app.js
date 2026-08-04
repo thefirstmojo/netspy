@@ -1,4 +1,4 @@
-/* NetMon Frontend — Charts + sortierbare Prozessliste, 1s Refresh */
+/* NetMon Frontend — charts + sortable process list, 1s refresh */
 "use strict";
 
 const state = {
@@ -42,8 +42,8 @@ function buildCharts(servers) {
       `<span class="badge" id="badge-${esc(s.name)}"></span></div>` +
       `<div class="chartwrap"><canvas></canvas></div>` +
       `<div class="chartlegend">` +
-      `<span class="lg rx">▼ rein ${fmt(0)}</span>` +
-      `<span class="lg tx">▲ raus ${fmt(0)}</span></div>`;
+      `<span class="lg rx">▼ in ${fmt(0)}</span>` +
+      `<span class="lg tx">▲ out ${fmt(0)}</span></div>`;
     grid.appendChild(card);
   }
 
@@ -54,8 +54,8 @@ function buildCharts(servers) {
       data: {
         labels: [],
         datasets: [
-          { label: "rein", data: [], borderColor: COLORS.rx, backgroundColor: "rgba(34,211,238,.12)", fill: true, tension: .3, pointRadius: 0, borderWidth: 2 },
-          { label: "raus", data: [], borderColor: COLORS.tx, backgroundColor: "rgba(245,158,11,.10)", fill: true, tension: .3, pointRadius: 0, borderWidth: 2 },
+          { label: "in", data: [], borderColor: COLORS.rx, backgroundColor: "rgba(34,211,238,.12)", fill: true, tension: .3, pointRadius: 0, borderWidth: 2 },
+          { label: "out", data: [], borderColor: COLORS.tx, backgroundColor: "rgba(245,158,11,.10)", fill: true, tension: .3, pointRadius: 0, borderWidth: 2 },
         ],
       },
       options: {
@@ -110,7 +110,7 @@ function renderStatusbar(servers) {
     badge.className = "badge " + (s.online ? "ok" : "bad");
     badge.textContent = s.online ? "online · ▼ " + fmt(t.rx) + " ▲ " + fmt(t.tx) : "offline";
     const lg = document.querySelectorAll("#chart-" + s.name.replace(/[^a-zA-Z0-9]/g, "_") + " .chartlegend .lg");
-    if (lg.length === 2) { lg[0].textContent = "▼ rein " + fmt(t.rx); lg[1].textContent = "▲ raus " + fmt(t.tx); }
+    if (lg.length === 2) { lg[0].textContent = "▼ in " + fmt(t.rx); lg[1].textContent = "▲ out " + fmt(t.tx); }
   }
 }
 
@@ -122,7 +122,7 @@ function buildServerFilter(servers) {
 
   const all = document.createElement("label");
   all.className = "chip";
-  all.innerHTML = `<input type="checkbox" checked><span>Alle</span>`;
+  all.innerHTML = `<input type="checkbox" checked><span>All</span>`;
   all.querySelector("input").addEventListener("change", e => {
     const v = e.target.checked;
     servers.forEach(s => state.visible[s.name] = v);
@@ -151,16 +151,16 @@ function applyVisibility() {
   if (state.lastTable) renderTable(state.lastTable, state.servers.map(n => ({ name: n })));
 }
 
-/* ---------- Prozess-Tabelle: eine Zeile pro (Prozess x Server) ---------- */
+/* ---------- Process table: one row per (process x server) ---------- */
 function buildTableHeader(servers) {
   const thead = document.getElementById("procthead");
   const cls = k => "sortable" +
     (state.sortKey === k ? " active" + (state.sortDir < 0 ? " sort-desc" : "") : "");
   thead.innerHTML = `<tr>` +
-    `<th data-key="name" class="${cls("name")}">Prozess</th>` +
+    `<th data-key="name" class="${cls("name")}">Process</th>` +
     `<th data-key="server" class="${cls("server")}">Server</th>` +
-    `<th data-key="rx" class="sortable num ${state.sortKey === "rx" ? "active" + (state.sortDir < 0 ? " sort-desc" : "") : ""}">rein</th>` +
-    `<th data-key="tx" class="sortable num ${state.sortKey === "tx" ? "active" + (state.sortDir < 0 ? " sort-desc" : "") : ""}">raus</th>` +
+    `<th data-key="rx" class="sortable num ${state.sortKey === "rx" ? "active" + (state.sortDir < 0 ? " sort-desc" : "") : ""}">in</th>` +
+    `<th data-key="tx" class="sortable num ${state.sortKey === "tx" ? "active" + (state.sortDir < 0 ? " sort-desc" : "") : ""}">out</th>` +
     `</tr>`;
 }
 
@@ -230,11 +230,11 @@ function renderIfaces(ifaces, servers) {
         `<td class="num rx">${fmt(i.rx)}</td><td class="num tx">${fmt(i.tx)}</td></tr>`;
     }).join("");
     return `<details class="card" data-server="${esc(s.name)}"${wasOpen[s.name] ? " open" : ""}>` +
-      `<summary>Interfaces · ${esc(s.name)} (${list.length}) <span class="hint">— Kopf klickbar zum Sortieren</span></summary>` +
+      `<summary>Interfaces · ${esc(s.name)} (${list.length}) <span class="hint">— click header to sort</span></summary>` +
       `<table class="ifacetable"><thead><tr>` +
       `<th class="${cls("name")}" data-key="name">Interface</th>` +
-      `<th class="${cls("rx")}" data-key="rx">rein</th>` +
-      `<th class="${cls("tx")}" data-key="tx">raus</th>` +
+      `<th class="${cls("rx")}" data-key="rx">in</th>` +
+      `<th class="${cls("tx")}" data-key="tx">out</th>` +
       `</tr></thead><tbody>${rows}</tbody></table></details>`;
   }).join("");
 }

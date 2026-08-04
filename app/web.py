@@ -139,7 +139,7 @@ class Monitor:
                     "tx": [p[2] for p in h],
                 }
 
-            # Prozessliste ueber alle Server mergen (Zeilen = Prozess/Container)
+            # Merge process list across all servers (rows = process/container)
             table: dict = {}
             for s in self.servers:
                 name = s["name"]
@@ -157,7 +157,7 @@ class Monitor:
                     row["hosts"][name] = {"rx": c["rx"], "tx": c["tx"]}
                 rest = snap.get("rest") or {"rx": 0.0, "tx": 0.0}
                 if rest["rx"] > 0 or rest["tx"] > 0:
-                    key = "- nicht zugeordnet (Kernel/UDP) -"
+                    key = "- not assigned (kernel/UDP) -"
                     row = table.setdefault(key, {"hosts": {}, "kind": "rest"})
                     row["hosts"][name] = {"rx": rest["rx"], "tx": rest["tx"]}
 

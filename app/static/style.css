@@ -83,7 +83,7 @@ th.sortable.active { color: var(--text); }
 th.sortable.active::after { content: " ▲"; font-size: 10px; }
 th.sortable.active.sort-desc::after { content: " ▼"; }
 th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
-/* Feste Spaltenbreiten: kein Springen bei wechselnden Raten */
+/* Fixed column widths: no jumping when rates change */
 #proctable { table-layout: fixed; width: 100%; }
 #proctable th:first-child, #proctable td.pname { width: 42%; }
 #proctable th:nth-child(2), #proctable td.srv { width: 16%; }
