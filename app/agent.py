@@ -141,6 +141,7 @@ class Sampler:
         self._containers: dict = {}       # netns-inode -> container-name
         self._mac_containers: dict = {}   # mac -> container-name
         self._veth_containers: dict = {}  # veth-iface -> container-name
+        self._fdb_size = 0                # Anzahl gelesener FDB-Einträge
         self._ns_ts = 0.0
         self._last_mono = 0.0
         self._ss_error: str | None = None
@@ -277,6 +278,7 @@ class Sampler:
                 self._mac_containers = mac_map
             # veth -> Container über FDB (MAC ist auf dem Bridge-Port gelernt)
             fdb = self._run_fdb()
+            self._fdb_size = len(fdb)
             vc = {}
             for mac, veth in fdb.items():
                 cname = mac_map.get(mac)
@@ -458,6 +460,15 @@ class Sampler:
                 # Diagnose: pid1 != Container-Init -> pid:host aktiv
                 "pid1": self._pid1_comm(),
                 "proc_count": self._proc_count(),
+                # Diagnose Docker-Zuordnung (Container-Zeilen)
+                "docker": {
+                    "socket": bool(self.docker_sock)
+                    and os.path.exists(self.docker_sock),
+                    "containers": len(self._containers),
+                    "macs": len(self._mac_containers),
+                    "fdb": self._fdb_size,
+                    "veths_mapped": len(self._veth_containers),
+                },
             }
 
     def snapshot(self) -> dict:
@@ -475,6 +486,8 @@ class Sampler:
                     "ss_ok": False,
                     "pid1": self._pid1_comm(),
                     "proc_count": self._proc_count(),
+                    "docker": {"socket": False, "containers": 0, "macs": 0,
+                               "fdb": 0, "veths_mapped": 0},
                 }
             return dict(self._last)
 
