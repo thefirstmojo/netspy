@@ -20,35 +20,36 @@ Unraid 10.10.10.10                        TrueNAS 10.10.10.20
 └──────────────────────────────┘
 ```
 
-Everything is driven by **one `docker-compose.yml`** and environment variables
-(`.env.example`): `ROLE` decides what the container does, `SERVERS` tells the
-dashboard where the connections go.
+Everything is driven by **one `docker-compose.yml`** — all configuration lives
+directly in the file, **no `.env` file required**. `ROLE` decides what the
+container does, `SERVERS` tells the dashboard where the connections go. Copy
+the compose to each host and adjust the values there.
 
 ## Deploy on Unraid
 
 ```bash
 git clone https://github.com/thefirstmojo/netspy.git && cd netspy
-cp .env.example .env                # set ROLE=web, adjust SERVERS
+# edit docker-compose.yml: ROLE=web, SERVERS, UPLINK=br0, AGENT_TOKEN,
+# uncomment the Docker-socket volume for per-container rows
 docker compose up -d                # pulls ghcr.io/thefirstmojo/netspy:latest (public)
 # UI: http://10.10.10.10:8090
 ```
 
-## Deploy on TrueNAS (Portainer)
+## Deploy on another host as agent (TrueNAS via Portainer, Debian, …)
 
-1. **Portainer** → Stacks → **Add stack**
-2. **Repository**: this repo's Git URL, path `docker-compose.yml`
-3. Set **environment variables**:
-   - `ROLE=agent`
-   - `AGENT_PORT=8091`
-   - `UPLINK=br0`
-   - `AGENT_TOKEN=<same token as Unraid>`
-   - No Docker socket mount needed (default, works everywhere)
-4. Deploy → test: `curl http://10.10.10.20:8091/api/metrics`
-
-> **TrueNAS / AppArmor:** TrueNAS enforces the `docker-default` AppArmor profile
-> on all containers, which blocks the `/proc/<pid>/fd` reads that `ss` needs for
-> process attribution. Add `security_opt: [apparmor:unconfined]` to the stack —
-> this is required for per-process rows on TrueNAS (no `privileged` needed).
+1. **Portainer** → Stacks → **Add stack** (or use docker compose directly)
+2. Paste/edit `docker-compose.yml`:
+   - `ROLE: agent`
+   - `SERVERS: ""` (empty — the agent is polled by the web instance)
+   - `UPLINK: "eth0"` (or whatever the host's uplink is)
+   - `AGENT_TOKEN: "<same token as the web instance>"`
+   - **TrueNAS:** uncomment the `security_opt: [apparmor:unconfined]` block —
+     TrueNAS enforces the `docker-default` AppArmor profile on all containers,
+     which blocks the `/proc/<pid>/fd` reads that `ss` needs for process
+     attribution. This is the minimal relaxation (no `privileged` needed).
+   - Debian: only needed if AppArmor is active on that host.
+3. Deploy → test: `curl http://10.10.10.20:8091/api/metrics` (with the
+   `X-Agent-Token` header)
 
 > **Version pinning:** Portainer caches images. Pin the tag
 > (`image: ghcr.io/thefirstmojo/netspy:v0.3.11`) for deterministic updates —
@@ -63,7 +64,7 @@ locally:
 
 ```bash
 docker build -t netspy:latest .
-# in .env:  NETSPY_IMAGE=netspy:latest
+# change the image line in docker-compose.yml to: image: netspy:latest
 docker compose up -d
 ```
 
@@ -87,18 +88,24 @@ docker compose up -d
   traffic appears as a per-container row instead. Kernel-level SMB/NFS mounts
   (cifs client) are likewise kernel-driven and land in the "not assigned" row.
 
-## Configuration (env)
+## Configuration
 
-| Variable | Default | Description |
+All values are set **directly in `docker-compose.yml`** (no `.env` file):
+
+| Key (environment) | Default | Description |
 |---|---|---|
 | `ROLE` | `web` | `web` or `agent` |
-| `SERVERS` | `Unraid=local` | `Name=local;Name=http://host:8091` |
-| `UPLINK` | `br0` (auto) | Comma-separated, e.g. `br0,bond0` |
+| `SERVERS` | `Main=local` | `Name=local;Name=http://host:8091` |
+| `UPLINK` | `br0` | Comma-separated, e.g. `br0,bond0` or `eth0` |
 | `WEB_PORT` | `8090` | Web UI |
 | `AGENT_PORT` | `8091` | Agent API |
 | `AGENT_TOKEN` | empty | Header `X-Agent-Token` (must match on all hosts) |
-| `NETSPY_IMAGE` | `netspy:latest` | Prebuilt image (e.g. GHCR) |
-| `NETSPY_CONTAINER` | `netspy` | Container name |
+| `DOCKER_SOCK` | `/var/run/docker.sock` (web) | Docker socket for container rows; `""` disables |
+
+Plus two commented option blocks in the compose, enabled per host:
+- **AppArmor** (`security_opt: [apparmor:unconfined]`) — hosts that enforce an
+  AppArmor container profile (TrueNAS, Debian with AppArmor)
+- **Docker socket volume** — hosts with a Docker socket, for per-container rows
 
 ## Security
 

@@ -1,48 +1,77 @@
-# NetSpy — ONE compose for Unraid AND TrueNAS.
-# Role and connections are fully controlled by environment variables
-# (see .env.example). No file changes needed between hosts.
+# NetSpy — all configuration lives in this file. No .env needed.
+# Copy this file to each host and adjust the values for that host.
 
-#   Unraid (dashboard + local sampler):
-#     ROLE=web
-#     SERVERS="Unraid=local;TrueNAS=http://10.10.10.20:8091"
-#     -> docker compose up -d   (pulls ghcr.io/thefirstmojo/netspy:latest, public)
+# ────────────────────────────────────────────────────────────────────
+# ROLE decides what this instance does:
+#   web   = dashboard + local sampler + agent API
+#           (typical: Unraid, or any Linux host)
+#   agent = sampler + agent API only, feeds a web instance
+#           (typical: TrueNAS, Debian, any other host)
 #
-#   TrueNAS (collector only, via Portainer):
-#     ROLE=agent
-#     SERVERS=""
-#     -> Portainer: Stacks -> Add stack -> Repository (this repo) -> set Env Vars
-#     -> add: security_opt: [apparmor:unconfined]  (required for process rows)
-#
-#   Local build (development only): docker build -t netspy:latest .
-#   and then set NETSPY_IMAGE=netspy:latest.
+# Per-host notes:
+#   Unraid (web)  : UPLINK=br0, uncomment the Docker-socket block below
+#                   for per-container rows.
+#   TrueNAS (agent): uncomment the AppArmor block below (REQUIRED for
+#                   process attribution), keep the Docker-socket block
+#                   commented (no Docker socket in TrueNAS apps).
+#   Debian (agent): UPLINK=eth0/enpXsY/bond0; AppArmor block only if the
+#                   host enforces an AppArmor container profile; Docker
+#                   socket block if you want per-container rows there.
+# ────────────────────────────────────────────────────────────────────
 
 services:
   netspy:
-    image: ${NETSPY_IMAGE:-ghcr.io/thefirstmojo/netspy:latest}
-    container_name: ${NETSPY_CONTAINER:-netspy}
+    # Pin a version for deterministic updates, e.g. ghcr.io/thefirstmojo/netspy:v0.3.11
+    # (a new tag always forces a fresh pull; with :latest you must force re-pull)
+    image: ghcr.io/thefirstmojo/netspy:latest
+    container_name: netspy
     restart: unless-stopped
 
-    # Host network + host PID namespace: so /proc and ss see the real host
+    # Host network + host PID namespace: /proc and ss must see the real host
     # data (container runs as root).
     network_mode: host
     pid: host
     cap_drop: [ALL]
-    # SYS_PTRACE: needed so sockets of non-root processes can be attributed
+    # SYS_PTRACE: needed to attribute sockets of non-root processes
     # via /proc/<pid>/fd.
     cap_add: [SYS_PTRACE]
 
-    environment:
-      ROLE: ${ROLE:-web}
-      SERVERS: ${SERVERS:-Unraid=local}
-      UPLINK: ${UPLINK:-br0}
-      WEB_PORT: ${WEB_PORT:-8090}
-      AGENT_PORT: ${AGENT_PORT:-8091}
-      AGENT_TOKEN: ${AGENT_TOKEN:-}
+    # ── Only needed when the host enforces an AppArmor profile on        ──
+    # ── containers (TrueNAS always does; Debian only if AppArmor is      ──
+    # ── active). Without it, ss cannot resolve processes → empty list.   ──
+    # ── Uncomment on such hosts:                                         ──
+    # security_opt:
+    #   - apparmor:unconfined
 
-    # OPTIONAL — RECOMMENDED on Unraid: enables container rows
-    # (process -> container name and veth -> container in the process list).
-    # Uncomment these 3 lines. Off by default so the file stays valid on
-    # every compose version (Unraid/TrueNAS/Portainer).
-    # Do NOT enable on TrueNAS, there is no Docker socket.
+    environment:
+      # Role: web (dashboard + local sampler) or agent (collector only)
+      ROLE: "web"
+
+      # Servers the dashboard polls. Format: Name=local;Name=http://host:8091
+      #   local            = sample this host directly (web role)
+      #   http://host:8091 = agent API of another host (agent role)
+      # (web example — adjust names/IPs to your hosts; agent hosts: "")
+      SERVERS: "Main=local;Remote=http://10.10.10.20:8091"
+
+      # Interfaces counted as "total traffic" (comma-separated).
+      # Unraid: br0 | Debian/other: eth0, enpXsY, bond0, ...
+      UPLINK: "br0"
+
+      # Ports (adjust on conflict)
+      WEB_PORT: "8090"
+      AGENT_PORT: "8091"
+
+      # Shared token — MUST be identical on the web instance and every agent
+      AGENT_TOKEN: "CHANGE_ME"
+
+      # Docker socket for per-container rows — only effective together with
+      # the volumes block below. Empty string disables it (default for the
+      # agent role).
+      DOCKER_SOCK: "/var/run/docker.sock"
+
+    # ── Per-container throughput (veth → container names in the list)    ──
+    # ── Requires a Docker socket on THIS host (Unraid, Debian with       ──
+    # ── docker). Keep commented on hosts without a Docker socket         ──
+    # ── (TrueNAS apps).                                                  ──
     # volumes:
     #   - /var/run/docker.sock:/var/run/docker.sock:ro
