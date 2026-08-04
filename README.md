@@ -27,7 +27,7 @@ Dashboard, wo die Verbindungen hingehen.
 ## Deploy Unraid
 
 ```bash
-git clone <repo-url> && cd netspy   # oder Compose-Datei direkt nutzen
+git clone https://github.com/thefirstmojo/netspy.git && cd netspy
 cp .env.example .env                # ROLE=web, SERVERS anpassen
 docker compose up -d --build
 # UI: http://10.10.10.101:8090
