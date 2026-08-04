@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NetSpy — Netzwerk-Überwachung</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=@@VERSION@@">
 <script src="chart.umd.min.js"></script>
 </head>
 <body>
 <header>
   <div class="brand">
-    <h1>NetSpy</h1>
+    <h1>NetSpy <span id="ver" class="ver"></span></h1>
     <span class="subtitle">Netzwerk-Überwachung · Unraid / TrueNAS</span>
   </div>
   <div id="statusbar" class="statusbar"></div>
@@ -34,6 +34,6 @@
   <footer>NetSpy · Sampling 1 s · History 1 h (im Speicher)</footer>
 </main>
 
-<script src="app.js"></script>
+<script src="app.js?v=@@VERSION@@"></script>
 </body>
 </html>

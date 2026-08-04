@@ -85,6 +85,8 @@ function updateCharts(series) {
 
 /* ---------- Statusleiste + Karten ---------- */
 function renderStatusbar(servers) {
+  const ver = document.getElementById("ver");
+  if (ver && state.version) ver.textContent = "v" + state.version;
   const bar = document.getElementById("statusbar");
   bar.innerHTML = servers.map(s => {
     const on = s.online;
@@ -190,6 +192,7 @@ async function refresh() {
     buildCharts(d.servers);
     buildTableHeader(d.servers);
   }
+  state.version = d.version || state.version;
   renderStatusbar(d.servers);
   updateCharts(d.series);
   renderTable(d.table, d.servers);

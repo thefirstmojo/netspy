@@ -10,6 +10,7 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY app/ /app/
+COPY VERSION /app/VERSION
 
 EXPOSE 8090 8091
 

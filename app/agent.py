@@ -29,6 +29,19 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PROC = "/proc"
 
+
+def load_version() -> str:
+    base = os.path.dirname(os.path.abspath(__file__))
+    for p in (os.path.join(base, "VERSION"), os.path.join(base, "..", "VERSION")):
+        try:
+            with open(p) as f:
+                v = f.read().strip()
+                if v:
+                    return v
+        except OSError:
+            continue
+    return "dev"
+
 # Fallback-Reihenfolge fuer "Uplink"-Interfaces (wenn UPLINK nicht gesetzt)
 UPLINK_FALLBACK = ["br0", "bond0", "eth0", "enp", "ens", "eno", "eth"]
 
@@ -412,6 +425,7 @@ class Sampler:
 
         with self.lock:
             self._last = {
+                "version": load_version(),
                 "hostname": socket.gethostname(),
                 "ts": time.time(),
                 "totals": {k: round(v, 1) for k, v in totals.items()},

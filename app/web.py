@@ -33,6 +33,22 @@ MIME = {
 }
 
 
+def load_version() -> str:
+    base = os.path.dirname(os.path.abspath(__file__))
+    for p in (os.path.join(base, "VERSION"), os.path.join(base, "..", "VERSION")):
+        try:
+            with open(p) as f:
+                v = f.read().strip()
+                if v:
+                    return v
+        except OSError:
+            continue
+    return "dev"
+
+
+VERSION = load_version()
+
+
 def parse_servers(spec: str) -> list:
     """'Unraid=local;TrueNAS=http://host:8091' -> [{'name','url'|None}, ...]"""
     out = []
@@ -144,6 +160,7 @@ class Monitor:
             rows.sort(key=lambda r: r["total"], reverse=True)
 
             return {
+                "version": VERSION,
                 "servers": [
                     {
                         "name": s["name"],
@@ -190,6 +207,9 @@ class WebHandler(BaseHTTPRequestHandler):
                 with open(fname, "rb") as f:
                     body = f.read()
                 ctype = MIME.get(os.path.splitext(fname)[1], "application/octet-stream")
+                # Cache-Busting: Versionsnummer in index.html einsetzen
+                if fname.endswith("index.html"):
+                    body = body.decode("utf-8").replace("@@VERSION@@", VERSION).encode("utf-8")
                 self._send_bytes(200, body, ctype)
                 return
         self._send_bytes(404, b"not found", "text/plain")

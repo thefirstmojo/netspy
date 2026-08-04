@@ -27,6 +27,11 @@ header {
   position: sticky; top: 0; z-index: 10;
 }
 .brand h1 { margin: 0; font-size: 20px; letter-spacing: .5px; }
+.ver {
+  font-size: 11px; font-weight: 400; color: var(--muted);
+  border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px;
+  vertical-align: middle; letter-spacing: 0;
+}
 .brand .subtitle { color: var(--muted); font-size: 12px; }
 .statusbar { display: flex; gap: 10px; flex-wrap: wrap; margin-left: auto; }
 
