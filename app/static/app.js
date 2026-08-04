@@ -141,9 +141,11 @@ function renderTable(table, servers) {
   });
 
   tbody.innerHTML = rows.map(r => {
-    const isRest = r.name.startsWith("- nicht zugeordnet");
-    let cells = `<td class="pname${isRest ? " rest" : ""}">${esc(r.name)}` +
-      (r.container ? `<span class="cont">${esc(r.container)}</span>` : "") + `</td>`;
+    const isRest = r.kind === "rest";
+    let badge = "";
+    if (r.kind === "container") badge = `<span class="cont">Container</span>`;
+    else if (r.container) badge = `<span class="cont">${esc(r.container)}</span>`;
+    let cells = `<td class="pname${isRest ? " rest" : ""}">${esc(r.name)}${badge}</td>`;
     let total = 0;
     for (const s of servers) {
       const h = r.hosts[s.name];
@@ -157,15 +159,19 @@ function renderTable(table, servers) {
   }).join("");
 }
 
-/* ---------- Interfaces (einklappbar) ---------- */
+/* ---------- Interfaces (einklappbar, offen-Status bleibt erhalten) ---------- */
 function renderIfaces(ifaces, servers) {
   const wrap = document.getElementById("ifaces");
+  const wasOpen = {};
+  wrap.querySelectorAll("details").forEach(d => { wasOpen[d.dataset.server] = d.open; });
   wrap.innerHTML = servers.map(s => {
     const list = ifaces[s.name] || [];
     const rows = list.map(i =>
-      `<tr><td class="pname">${esc(i.name)}${i.uplink ? ' <span class="uplink">UPLINK</span>' : ""}</td>` +
+      `<tr><td class="pname">${esc(i.name)}${i.uplink ? ' <span class="uplink">UPLINK</span>' : ""}` +
+      (i.container ? ` <span class="cont">${esc(i.container)}</span>` : "") + `</td>` +
       `<td class="num rx">${fmt(i.rx)}</td><td class="num tx">${fmt(i.tx)}</td></tr>`).join("");
-    return `<details class="card"><summary>Interfaces · ${esc(s.name)} (${list.length})</summary>` +
+    return `<details class="card" data-server="${esc(s.name)}"${wasOpen[s.name] ? " open" : ""}>` +
+      `<summary>Interfaces · ${esc(s.name)} (${list.length})</summary>` +
       `<table class="ifacetable"><thead><tr><th>Interface</th><th class="num">rein</th><th class="num">raus</th></tr></thead>` +
       `<tbody>${rows}</tbody></table></details>`;
   }).join("");

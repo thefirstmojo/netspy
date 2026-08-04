@@ -113,7 +113,7 @@ class Monitor:
                     "tx": [p[2] for p in h],
                 }
 
-            # Prozessliste ueber alle Server mergen (Zeilen = Prozess)
+            # Prozessliste ueber alle Server mergen (Zeilen = Prozess/Container)
             table: dict = {}
             for s in self.servers:
                 name = s["name"]
@@ -121,20 +121,25 @@ class Monitor:
                 if not snap:
                     continue
                 for p in snap.get("processes", []):
-                    row = table.setdefault(p["name"], {"hosts": {}})
+                    row = table.setdefault(p["name"], {"hosts": {}, "kind": "proc"})
                     row["hosts"][name] = {"rx": p["rx"], "tx": p["tx"]}
                     if p.get("container"):
                         row.setdefault("container", p["container"])
+                # Container-Zeilen (veth-Summen, z. B. Bridge-Container auf Unraid)
+                for c in snap.get("containers", []):
+                    row = table.setdefault(c["name"], {"hosts": {}, "kind": "container"})
+                    row["hosts"][name] = {"rx": c["rx"], "tx": c["tx"]}
                 rest = snap.get("rest") or {"rx": 0.0, "tx": 0.0}
                 if rest["rx"] > 0 or rest["tx"] > 0:
                     key = "- nicht zugeordnet (Kernel/UDP) -"
-                    row = table.setdefault(key, {"hosts": {}})
+                    row = table.setdefault(key, {"hosts": {}, "kind": "rest"})
                     row["hosts"][name] = {"rx": rest["rx"], "tx": rest["tx"]}
 
             rows = []
             for pname, v in table.items():
                 total = sum(x["rx"] + x["tx"] for x in v["hosts"].values())
-                rows.append({"name": pname, "container": v.get("container"),
+                rows.append({"name": pname, "kind": v.get("kind", "proc"),
+                             "container": v.get("container"),
                              "total": total, "hosts": v["hosts"]})
             rows.sort(key=lambda r: r["total"], reverse=True)
 

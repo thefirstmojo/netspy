@@ -36,10 +36,10 @@ services:
       AGENT_PORT: ${AGENT_PORT:-8091}
       AGENT_TOKEN: ${AGENT_TOKEN:-}
 
-    # OPTIONAL — nur auf Unraid, wenn Prozess -> Container-Name gewünscht ist:
-    # Diese 3 Zeilen einkommentieren. (Alte Compose-Versionen kennen kein
-    # "optional: true", deshalb ist der Mount standardmaessig AUS — so
-    # funktioniert die Datei auf Unraid, TrueNAS und Portainer gleichermassen.)
+    # OPTIONAL — EMPFOHLEN auf Unraid: aktiviert die Container-Zeilen
+    # (Prozess -> Container-Name und veth -> Container in der Prozessliste).
+    # Diese 3 Zeilen einkommentieren. Standardmaessig AUS, damit die Datei
+    # auf jeder Compose-Version (Unraid/TrueNAS/Portainer) valide ist.
     # Auf TrueNAS NICHT aktivieren, dort existiert kein Docker-Socket.
     # volumes:
     #   - /var/run/docker.sock:/var/run/docker.sock:ro

@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
-"""NetMon-Agent: per-interface und per-process Netzwerkraten.
+"""NetSpy-Agent: per-interface und per-process Netzwerkraten.
 
 Datenquellen:
   - /proc/net/dev          -> Interface-Zaehler (kumulativ, 64-bit)
   - `ss -tinp` (inet_diag) -> kumulative Byte-Zaehler pro TCP-Socket inkl. PID
   - /proc/<pid>/comm       -> Prozessname
   - /proc/<pid>/ns/net     -> Zuordnung Prozess -> Container (via Docker-Socket)
+  - `bridge fdb show`      -> Zuordnung veth-Interface -> Container (via MAC)
 
 Voraussetzungen: network_mode: host, pid: host, laeuft als root (uid 0).
 Optional: /var/run/docker.sock (read-only) fuer Container-Namen.
+
+Glättung: Prozess-/Container-Raten laufen durch einen EMA (0.5) und werden
+erst nach 6 s Inaktivität aus der Liste entfernt -> stabile, ruhige Anzeige.
 
 Reine Standardbibliothek, keine Dependencies.
 """
@@ -32,6 +36,14 @@ UPLINK_FALLBACK = ["br0", "bond0", "eth0", "enp", "ens", "eno", "eth"]
 _SS_USERS_RE = re.compile(r'users:\(\(("?)([^,)]+),pid=(\d+),fd=\d+')
 _SS_ACKED_RE = re.compile(r'bytes_acked:(\d+)')
 _SS_RECV_RE = re.compile(r'bytes_received:(\d+)')
+
+# bridge fdb show: "00:11:22:33:44:55 dev vethXXX ..."
+_FDB_RE = re.compile(r"^([0-9a-f:]{17})\s+dev\s+(\S+)")
+
+# EMA-Gewicht (0.5 = neue Messung zur Haelfte)
+EMA = 0.5
+# Prozess bleibt nach letzter Aktivitaet noch N Sekunden in der Liste
+DECAY_S = 6.0
 
 # Beispiel-Ausgabe von `ss -tinp` fuer den Parser-Selbsttest
 _SS_FIXTURE = (
@@ -90,7 +102,7 @@ def read_net_dev() -> dict:
 
 
 class Sampler:
-    """Sampled 1x/Sekunde Interface- und Prozessraten."""
+    """Sampled 1x/Sekunde Interface-, Container- und Prozessraten."""
 
     def __init__(self, uplink: str = "", docker_sock: str = ""):
         self.uplink_cfg = [u.strip() for u in uplink.split(",") if u.strip()]
@@ -101,11 +113,18 @@ class Sampler:
         self._prev_ss: dict = {}
         self._comm: dict = {}
         self._ns: dict = {}
-        self._containers: dict = {}
+        self._containers: dict = {}       # netns-inode -> container-name
+        self._mac_containers: dict = {}   # mac -> container-name
+        self._veth_containers: dict = {}  # veth-iface -> container-name
         self._ns_ts = 0.0
         self._last_mono = 0.0
         self._ss_error: str | None = None
         self._last: dict | None = None
+
+        # Glättung / Stabilität
+        self._ema: dict = {}      # name -> {"rx": float, "tx": float}
+        self._active: dict = {}   # name -> monotonic timestamp
+        self._ema_rest: dict | None = None
 
     # ------------------------------------------------------------------
     # Hilfen
@@ -137,8 +156,21 @@ class Sampler:
             return name == "bond0"
         return bool(re.match(r"^(eth|enp|ens|eno)\d", name))
 
+    def _pid1_comm(self) -> str:
+        try:
+            with open(f"{PROC}/1/comm") as f:
+                return f.read().strip()[:40]
+        except OSError:
+            return "?"
+
+    def _proc_count(self) -> int:
+        try:
+            return sum(1 for e in os.listdir(PROC) if e.isdigit())
+        except OSError:
+            return 0
+
     # ------------------------------------------------------------------
-    # Docker-Socket (optional): Prozess -> Container-Name
+    # Docker-Socket (optional): Prozess/Container-Zuordnung
     # ------------------------------------------------------------------
     def _docker_get(self, path: str):
         if not self.docker_sock or not os.path.exists(self.docker_sock):
@@ -162,9 +194,32 @@ class Sampler:
         except Exception:
             return None
 
+    def _run_fdb(self) -> dict:
+        """bridge fdb show -> {mac: veth-interface}. Leer wenn nicht verfügbar."""
+        try:
+            out = subprocess.run(
+                ["bridge", "fdb", "show"], capture_output=True, text=True, timeout=3
+            )
+            if out.returncode != 0:
+                return {}
+            res = {}
+            for line in out.stdout.splitlines():
+                m = _FDB_RE.match(line.strip())
+                if m:
+                    res.setdefault(m.group(1).lower(), m.group(2))
+            return res
+        except (FileNotFoundError, Exception):
+            return {}
+
     def refresh_containers(self) -> None:
-        """Netzwerk-Namespace des Hauptprozesses je Container -> Container-Name."""
+        """Container-Zuordnungen (max. alle 15 s):
+        - netns-inode des Hauptprozesses -> Container (Prozess-Zuordnung)
+        - Container-MAC (Docker-API) + bridge fdb -> veth-Interface -> Container
+        """
         if not self.docker_sock or not os.path.exists(self.docker_sock):
+            self._containers = {}
+            self._mac_containers = {}
+            self._veth_containers = {}
             return
         if time.time() - self._ns_ts < 15:
             return
@@ -172,6 +227,7 @@ class Sampler:
         try:
             containers = self._docker_get("/containers/json") or []
             ns_map = {}
+            mac_map = {}
             for c in containers:
                 cid = c.get("Id", "")
                 name = (c.get("Names") or ["?"])[0].lstrip("/")
@@ -179,15 +235,29 @@ class Sampler:
                 if not info:
                     continue
                 pid = (info.get("State") or {}).get("Pid") or 0
-                if pid <= 0:
-                    continue
-                try:
-                    st = os.stat(f"{PROC}/{pid}/ns/net")
-                    ns_map[st.st_ino] = name
-                except OSError:
-                    continue
+                if pid > 0:
+                    try:
+                        st = os.stat(f"{PROC}/{pid}/ns/net")
+                        ns_map[st.st_ino] = name
+                    except OSError:
+                        pass
+                nets = (info.get("NetworkSettings") or {}).get("Networks") or {}
+                for net in nets.values():
+                    mac = (net or {}).get("MacAddress")
+                    if mac:
+                        mac_map[mac.lower()] = name
             if ns_map:
                 self._containers = ns_map
+            if mac_map:
+                self._mac_containers = mac_map
+            # veth -> Container über FDB (MAC ist auf dem Bridge-Port gelernt)
+            fdb = self._run_fdb()
+            vc = {}
+            for mac, veth in fdb.items():
+                cname = mac_map.get(mac)
+                if cname:
+                    vc[veth] = cname
+            self._veth_containers = vc
         except Exception:
             pass
 
@@ -220,24 +290,37 @@ class Sampler:
         ss = self._run_ss()
         self.refresh_containers()
 
-        # --- Interface-Raten ---
+        # --- Interface-Raten (inkl. veth->Container) ---
         iface_rates = {}
         for name, (rx, tx) in ifaces.items():
             if name == "lo":
                 continue
             prev = self._prev_iface.get(name)
             if prev is not None and dt > 0:
-                iface_rates[name] = {
+                rate = {
                     "rx": max(0.0, (rx - prev[0]) / dt),
                     "tx": max(0.0, (tx - prev[1]) / dt),
                     "uplink": self._is_uplink(name, ifaces),
+                    "container": self._veth_containers.get(name),
                 }
             else:
-                iface_rates[name] = {"rx": 0.0, "tx": 0.0, "uplink": self._is_uplink(name, ifaces)}
+                rate = {"rx": 0.0, "tx": 0.0, "uplink": self._is_uplink(name, ifaces),
+                        "container": self._veth_containers.get(name)}
+            iface_rates[name] = rate
         self._prev_iface = ifaces
 
-        # --- Per-Prozess-Raten (TCP) ---
-        procs: dict = {}
+        # --- Container-Raten = Summe ihrer veth-Interfaces ---
+        containers_raw = {}
+        for name, rate in iface_rates.items():
+            cname = rate.get("container")
+            if cname:
+                e = containers_raw.setdefault(cname, [0.0, 0.0])
+                e[0] += rate["rx"]
+                e[1] += rate["tx"]
+
+        # --- Per-Prozess-Raten (TCP, roh) ---
+        raw: dict = {}
+        proc_cont: dict = {}
         if ss is not None:
             for pid, (rx, tx) in ss.items():
                 prev = self._prev_ss.get(pid)
@@ -248,14 +331,14 @@ class Sampler:
                 if drx <= 0 and dtx <= 0:
                     continue
                 name = self.comm_for(pid)
-                entry = procs.setdefault(name, {"rx": 0.0, "tx": 0.0})
-                entry["rx"] += drx
-                entry["tx"] += dtx
+                e = raw.setdefault(name, [0.0, 0.0])
+                e[0] += drx
+                e[1] += dtx
                 ns = self.netns_of(pid)
                 if ns:
-                    cont = self._containers.get(ns)
-                    if cont:
-                        entry["container"] = cont
+                    cname = self._containers.get(ns)
+                    if cname:
+                        proc_cont.setdefault(name, cname)
             self._prev_ss = ss
 
             # Caches auf lebende PIDs begrenzen
@@ -263,30 +346,66 @@ class Sampler:
             self._comm = {k: v for k, v in self._comm.items() if k in alive}
             self._ns = {k: v for k, v in self._ns.items() if k in alive}
 
-        # --- Summen + Rest (Kernel/UDP/ungenau) ---
+        # --- EMA-Glättung + Aktivitäts-Decay für Prozesse ---
+        for name, (r, t) in raw.items():
+            old = self._ema.get(name)
+            if old:
+                self._ema[name] = {
+                    "rx": EMA * r + (1 - EMA) * old["rx"],
+                    "tx": EMA * t + (1 - EMA) * old["tx"],
+                }
+            else:
+                self._ema[name] = {"rx": r, "tx": t}
+            self._active[name] = mono
+
+        emitted = {}
+        for name, ema in self._ema.items():
+            last = self._active.get(name, 0.0)
+            if ema["rx"] > 0.0 or ema["tx"] > 0.0 or (mono - last) < DECAY_S:
+                emitted[name] = ema
+        self._ema = {k: v for k, v in self._ema.items() if k in emitted}
+        self._active = {k: v for k, v in self._active.items() if k in emitted}
+
+        procs_list = [
+            {"name": n, "rx": round(v["rx"], 1), "tx": round(v["tx"], 1),
+             "container": proc_cont.get(n)}
+            for n, v in emitted.items()
+        ]
+        procs_list.sort(key=lambda p: p["rx"] + p["tx"], reverse=True)
+
+        containers_list = [
+            {"name": n, "rx": round(v[0], 1), "tx": round(v[1], 1)}
+            for n, v in containers_raw.items()
+        ]
+        containers_list.sort(key=lambda c: c["rx"] + c["tx"], reverse=True)
+
+        # --- Summen + Rest (Kernel/UDP/ungenau), ebenfalls geglättet ---
         totals = {"rx": 0.0, "tx": 0.0}
         for name, rate in iface_rates.items():
             if rate["uplink"]:
                 totals["rx"] += rate["rx"]
                 totals["tx"] += rate["tx"]
 
-        proc_rx = sum(p["rx"] for p in procs.values())
-        proc_tx = sum(p["tx"] for p in procs.values())
-        rest = {
-            "rx": max(0.0, totals["rx"] - proc_rx),
-            "tx": max(0.0, totals["tx"] - proc_tx),
+        proc_rx = sum(p["rx"] for p in procs_list)
+        proc_tx = sum(p["tx"] for p in procs_list)
+        cont_rx = sum(c["rx"] for c in containers_list)
+        cont_tx = sum(c["tx"] for c in containers_list)
+        rest_raw = {
+            "rx": max(0.0, totals["rx"] - proc_rx - cont_rx),
+            "tx": max(0.0, totals["tx"] - proc_tx - cont_tx),
         }
-
-        procs_list = [
-            {"name": n, "rx": round(v["rx"], 1), "tx": round(v["tx"], 1),
-             "container": v.get("container")}
-            for n, v in procs.items()
-        ]
-        procs_list.sort(key=lambda p: p["rx"] + p["tx"], reverse=True)
+        if self._ema_rest is None:
+            self._ema_rest = rest_raw
+        else:
+            self._ema_rest = {
+                "rx": EMA * rest_raw["rx"] + (1 - EMA) * self._ema_rest["rx"],
+                "tx": EMA * rest_raw["tx"] + (1 - EMA) * self._ema_rest["tx"],
+            }
+        rest = {k: round(min(v, totals[k]), 1) for k, v in self._ema_rest.items()}
 
         iface_list = [
             {"name": n, "rx": round(v["rx"], 1), "tx": round(v["tx"], 1),
-             "uplink": v["uplink"]}
+             "uplink": v["uplink"], "container": v["container"]}
             for n, v in sorted(iface_rates.items(),
                                key=lambda kv: kv[1]["rx"] + kv[1]["tx"], reverse=True)
         ]
@@ -296,11 +415,15 @@ class Sampler:
                 "hostname": socket.gethostname(),
                 "ts": time.time(),
                 "totals": {k: round(v, 1) for k, v in totals.items()},
-                "rest": {k: round(v, 1) for k, v in rest.items()},
+                "rest": rest,
                 "interfaces": iface_list,
                 "processes": procs_list,
+                "containers": containers_list,
                 "ss_error": self._ss_error,
                 "ss_ok": ss is not None,
+                # Diagnose: pid1 != Container-Init -> pid:host aktiv
+                "pid1": self._pid1_comm(),
+                "proc_count": self._proc_count(),
             }
 
     def snapshot(self) -> dict:
@@ -313,8 +436,11 @@ class Sampler:
                     "rest": {"rx": 0.0, "tx": 0.0},
                     "interfaces": [],
                     "processes": [],
+                    "containers": [],
                     "ss_error": self._ss_error,
                     "ss_ok": False,
+                    "pid1": self._pid1_comm(),
+                    "proc_count": self._proc_count(),
                 }
             return dict(self._last)
 
@@ -333,7 +459,7 @@ def sampler_loop(sampler: Sampler, interval: float = 1.0) -> None:
 # Agent-HTTP-API
 # ----------------------------------------------------------------------
 class AgentHandler(BaseHTTPRequestHandler):
-    server_version = "NetMonAgent/1.0"
+    server_version = "NetSpyAgent/1.0"
 
     def _send(self, code: int, obj: dict) -> None:
         body = json.dumps(obj).encode()
