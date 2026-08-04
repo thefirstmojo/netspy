@@ -111,6 +111,22 @@ def parse_ss(output: str) -> dict:
     return res
 
 
+def _decode_chunked(data: bytes) -> bytes:
+    """Dekodiert HTTP Transfer-Encoding: chunked (Docker-Daemon streamt so)."""
+    out = b""
+    i = 0
+    while i < len(data):
+        j = data.find(b"\r\n", i)
+        if j == -1:
+            break
+        size = int((data[i:j].split(b";")[0].strip() or b"0"), 16)
+        if size == 0:
+            break
+        out += data[j + 2:j + 2 + size]
+        i = j + 2 + size + 2  # Chunk-Daten + abschließendes CRLF überspringen
+    return out
+
+
 def read_net_dev() -> dict:
     """/proc/net/dev -> {iface: (rx_bytes, tx_bytes)} kumulativ."""
     dev = {}
@@ -215,7 +231,10 @@ class Sampler:
                     break
                 buf += chunk
             s.close()
-            body = buf.split(b"\r\n\r\n", 1)[1] if b"\r\n\r\n" in buf else b""
+            head, _, body = buf.partition(b"\r\n\r\n")
+            # Docker-Daemon liefert grosse Antworten chunked -> dekodieren
+            if b"transfer-encoding: chunked" in head.lower():
+                body = _decode_chunked(body)
             return json.loads(body.decode("utf-8", "replace"))
         except Exception:
             return None
