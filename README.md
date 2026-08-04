@@ -71,8 +71,10 @@ docker compose up -d
 ## How it works
 
 - **Interface rates:** `/proc/net/dev` (cumulative counters, delta per second).
-  `UPLINK` selects which interfaces count as "total traffic" (default `br0`;
-  auto-fallback: br0 → bond0 → first eth*/en*).
+  The "total traffic" is the interface(s) with the **default route** — detected
+  automatically (br0 on Unraid, eth0/enpXsY on Debian, bond0 with bonding), so
+  nothing needs to be configured. `UPLINK` is an optional override for special
+  setups (multiple WAN links, policy routing).
 - **Per-process rates (TCP):** `ss -tinpe` (inet_diag) yields cumulative byte
   counters per socket incl. PID and socket inode. Deltas are tracked **per
   socket inode** (immune to fork/handover spikes, e.g. smbd parent/child) and
@@ -96,7 +98,7 @@ All values are set **directly in `docker-compose.yml`** (no `.env` file):
 |---|---|---|
 | `ROLE` | `web` | `web` or `agent` |
 | `SERVERS` | `Main=local` | `Name=local;Name=http://host:8091` |
-| `UPLINK` | `br0` | Comma-separated, e.g. `br0,bond0` or `eth0` |
+| `UPLINK` | auto (default route) | Comma-separated override, e.g. `br0,bond0` |
 | `WEB_PORT` | `8090` | Web UI |
 | `AGENT_PORT` | `8091` | Agent API |
 | `AGENT_TOKEN` | empty | Header `X-Agent-Token` (must match on all hosts) |
@@ -121,8 +123,6 @@ Plus two commented option blocks in the compose, enabled per host:
 - **TCP only per process:** UDP (DNS, QUIC/streaming) and kernel traffic
   (nfsd/kworker) land in the "not assigned" row.
 - **1 s sampling:** short bursts are averaged.
-- **Avoid double counting:** set `UPLINK` to the top-level interface (`br0`),
-  don't sum bond slaves individually.
 
 ## Self-test
 

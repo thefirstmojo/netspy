@@ -54,8 +54,11 @@ services:
       SERVERS: "Main=local;Remote=http://10.10.10.20:8091"
 
       # Interfaces counted as "total traffic" (comma-separated).
-      # Unraid: br0 | Debian/other: eth0, enpXsY, bond0, ...
-      UPLINK: "br0"
+      # EMPTY = auto: the interface(s) with the default route are used
+      # (br0 on Unraid, eth0/enpXsY on Debian, bond0 with bonding) —
+      # nothing to configure. Override only for special setups
+      # (multiple WAN links, policy routing).
+      UPLINK: ""
 
       # Ports (adjust on conflict)
       WEB_PORT: "8090"

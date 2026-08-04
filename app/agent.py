@@ -43,8 +43,22 @@ def load_version() -> str:
             continue
     return "dev"
 
-# Fallback-Reihenfolge fuer "Uplink"-Interfaces (wenn UPLINK nicht gesetzt)
+# Fallback-Reihenfolge fuer "Uplink"-Interfaces (wenn keine Default-Route)
 UPLINK_FALLBACK = ["br0", "bond0", "eth0", "enp", "ens", "eno", "eth"]
+
+
+def parse_route_table(text: str) -> set:
+    """Inhalt von /proc/net/route -> Interfaces mit aktiver IPv4-Default-Route.
+
+    Nur Eintraege mit Destination 00000000 UND Flags UP|GATEWAY (0x3) zaehlen
+    (lo hat z. B. nur UP -> wird ausgeschlossen).
+    """
+    out = set()
+    for line in text.splitlines()[1:]:  # Kopfzeile ueberspringen
+        parts = line.split()
+        if len(parts) >= 4 and parts[1] == "00000000" and (int(parts[3], 16) & 0x3) == 0x3:
+            out.add(parts[0])
+    return out
 
 # ss -tinpe Parsing (e = extended: Socket-Inode für stabiles Pro-Socket-Tracking)
 _SS_USERS_RE = re.compile(r'users:\(\(("?)([^,)]+),pid=(\d+),fd=\d+')
@@ -149,6 +163,8 @@ class Sampler:
         self.uplink_cfg = [u.strip() for u in uplink.split(",") if u.strip()]
         self.docker_sock = docker_sock or ""
         self.lock = threading.Lock()
+        self._routes: set = set()
+        self._route_ts = 0.0
 
         self._prev_iface: dict = {}
         self._prev_ss: dict = {}
@@ -188,10 +204,29 @@ class Sampler:
                 self._ns[pid] = 0
         return self._ns[pid]
 
+    def _default_route_ifaces(self) -> set:
+        """Interfaces mit IPv4-Default-Route (30 s gecacht)."""
+        now = time.time()
+        if self._route_ts and now - self._route_ts < 30:
+            return self._routes
+        routes = set()
+        try:
+            with open(f"{PROC}/net/route") as f:
+                routes = parse_route_table(f.read())
+        except OSError:
+            pass
+        self._routes, self._route_ts = routes, now
+        return routes
+
     def _is_uplink(self, name: str, ifaces: dict) -> bool:
         if self.uplink_cfg:
             return any(name == u or name.startswith(u) for u in self.uplink_cfg)
-        # Auto: br0 (LAN-Bridge mit allem) -> bond0 -> erstes eth*
+        # Auto: Interfaces mit Default-Route (funktioniert ohne Konfiguration
+        # auf Unraid/br0, Debian/eth0-enp*, Bonding/bond0, ...)
+        routes = self._default_route_ifaces()
+        if routes:
+            return name in routes
+        # Fallback: br0 (LAN-Bridge mit allem) -> bond0 -> erstes eth*
         if "br0" in ifaces:
             return name == "br0"
         if "bond0" in ifaces:
@@ -581,7 +616,18 @@ def _self_test() -> None:
     parsed = parse_ss(_SS_FIXTURE)
     assert parsed.get(11111) == {"pid": 1234, "rx": 987654, "tx": 120000}, parsed
     assert parsed.get(22222) == {"pid": 777, "rx": 10000, "tx": 5000}, parsed
-    assert parsed.get(33333) == {"pid": 42, "rx": 0, "tx": 0}, parsed  # LISTEN ohne Zaehler
+    assert parsed.get(33333) == {"pid": 42, "rx": 0, "tx": 0}, parsed
+
+    # Default-Route-Erkennung: br0+bond0 (Default, UP|GATEWAY) erkannt,
+    # lo (nur UP) und eth0 (Subnetz-Route) ausgeschlossen
+    route_fix = (
+        "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n"
+        "br0\t00000000\t0102A8C0\t0003\t0\t0\t0\t00000000\t1500\t0\t0\n"
+        "eth0\t0102A8C0\t00000000\t0007\t0\t0\t0\t00FFFFFF\t1500\t0\t0\n"
+        "lo\t00000000\t00000000\t0001\t0\t0\t0\t00000000\t65536\t0\t0\n"
+        "bond0\t00000000\t0102A8C0\t0003\t0\t0\t0\t00000000\t1500\t0\t0\n"
+    )
+    assert parse_route_table(route_fix) == {"br0", "bond0"}, parse_route_table(route_fix)
     print("parse_ss Selbsttest OK (Pro-Socket-Inodes):", parsed)
 
 
