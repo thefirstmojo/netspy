@@ -83,14 +83,3 @@ services:
     # ── (TrueNAS apps).                                                  ──
     # volumes:
     #   - /var/run/docker.sock:/var/run/docker.sock:ro
-
-    # ── Alternative: web UI in BRIDGE mode with real port mapping        ──
-    # ── Only makes sense when this instance has NO local sampler         ──
-    # ── (SERVERS contains only remote hosts, no "=local") — in bridge    ──
-    # ── mode a local sampler would only see the container's own          ──
-    # ── interfaces. For that, comment out network_mode: host, pid: host  ──
-    # ── and the cap_* lines above, then uncomment:                       ──
-    # ports:
-    #   - "8090:8090"    # <host port>:<container port>; WEB_PORT must stay 8090
-    #   - "8091:8091"
-    # ── and use: ROLE: web, SERVERS: "Remote=http://10.10.10.20:8091"   ──

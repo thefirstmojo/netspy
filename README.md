@@ -3,6 +3,12 @@
 Web dashboard showing **interface and per-process network throughput** of Unraid
 and TrueNAS in real time (1 s sampling). **One image, two roles, one compose.**
 
+> **⚠️ Must run with `network_mode: host`** (host networking). The sampler needs
+> the host's `/proc` and `ss` data to measure real host traffic — in bridge mode
+> it would only see the container's own interfaces and sockets. For the same
+> reason the ports are configured via `WEB_PORT`/`AGENT_PORT` (the value IS the
+> host port; a `8090:8090` mapping is ignored with host networking).
+
 | Role | Purpose | Where |
 |---|---|---|
 | `ROLE=web` | Web UI (:8090) + local sampler + agent API (:8091) | Unraid |
