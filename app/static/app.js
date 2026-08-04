@@ -170,7 +170,10 @@ function renderIfaces(ifaces, servers) {
     const st = state.ifaceSort[s.name] || { key: "name", dir: 1 };
     const list = [...(ifaces[s.name] || [])].sort((a, b) => {
       let av, bv;
-      if (st.key === "name") { av = a.name.toLowerCase(); bv = b.name.toLowerCase(); }
+      if (st.key === "name") {
+        av = (a.container || a.name).toLowerCase();
+        bv = (b.container || b.name).toLowerCase();
+      }
       else { av = a[st.key] || 0; bv = b[st.key] || 0; }
       if (av < bv) return -st.dir;
       if (av > bv) return st.dir;
@@ -178,10 +181,15 @@ function renderIfaces(ifaces, servers) {
     });
     const cls = k => "sortable" + (k !== "name" ? " num" : "") +
       (st.key === k ? " active" + (st.dir < 0 ? " sort-desc" : "") : "");
-    const rows = list.map(i =>
-      `<tr><td class="pname">${esc(i.name)}${i.uplink ? ' <span class="uplink">UPLINK</span>' : ""}` +
-      (i.container ? ` <span class="cont">${esc(i.container)}</span>` : "") + `</td>` +
-      `<td class="num rx">${fmt(i.rx)}</td><td class="num tx">${fmt(i.tx)}</td></tr>`).join("");
+    const rows = list.map(i => {
+      // veth-Interfaces mit Container-Zuordnung zeigen den Docker-Namen
+      const label = i.container ? esc(i.container) : esc(i.name);
+      const sub = i.container ? ` <span class="vethsub">${esc(i.name)}</span>` : "";
+      return `<tr><td class="pname"${i.container ? ` title="${esc(i.name)}"` : ""}>${label}${sub}` +
+        (i.uplink ? ' <span class="uplink">UPLINK</span>' : "") +
+        (i.container ? ` <span class="cont">Container</span>` : "") + `</td>` +
+        `<td class="num rx">${fmt(i.rx)}</td><td class="num tx">${fmt(i.tx)}</td></tr>`;
+    }).join("");
     return `<details class="card" data-server="${esc(s.name)}"${wasOpen[s.name] ? " open" : ""}>` +
       `<summary>Interfaces · ${esc(s.name)} (${list.length}) <span class="hint">— Kopf klickbar zum Sortieren</span></summary>` +
       `<table class="ifacetable"><thead><tr>` +
