@@ -82,6 +82,14 @@ th.sortable.active { color: var(--text); }
 th.sortable.active::after { content: " ▲"; font-size: 10px; }
 th.sortable.active.sort-desc::after { content: " ▼"; }
 th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+/* Feste Spaltenbreiten: kein Springen bei wechselnden Raten */
+#proctable { table-layout: fixed; width: 100%; }
+#proctable th.num, #proctable td.num { width: 118px; }
+#proctable th:last-child, #proctable td.total { width: 96px; }
+#proctable td.pname { overflow: hidden; text-overflow: ellipsis; }
+.ifacetable { table-layout: fixed; width: 100%; }
+.ifacetable th:first-child, .ifacetable td:first-child { width: 55%; }
+.ifacetable th.num, .ifacetable td.num { width: 22.5%; }
 td.rx { color: var(--rx); }
 td.tx { color: var(--tx); }
 td.total { color: var(--text); font-weight: 600; }

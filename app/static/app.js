@@ -1,7 +1,7 @@
 /* NetMon Frontend — Charts + sortierbare Prozessliste, 1s Refresh */
 "use strict";
 
-const state = { sortKey: "total", sortDir: -1, servers: [], charts: {} };
+const state = { sortKey: "total", sortDir: -1, servers: [], charts: {}, ifaceSort: {}, lastIfaces: null };
 
 const COLORS = { rx: "#22d3ee", tx: "#f59e0b" };
 
@@ -161,23 +161,51 @@ function renderTable(table, servers) {
   }).join("");
 }
 
-/* ---------- Interfaces (einklappbar, offen-Status bleibt erhalten) ---------- */
+/* ---------- Interfaces (einklappbar, offen-Status + Sortierung bleiben erhalten) ---------- */
 function renderIfaces(ifaces, servers) {
   const wrap = document.getElementById("ifaces");
   const wasOpen = {};
   wrap.querySelectorAll("details").forEach(d => { wasOpen[d.dataset.server] = d.open; });
   wrap.innerHTML = servers.map(s => {
-    const list = ifaces[s.name] || [];
+    const st = state.ifaceSort[s.name] || { key: "name", dir: 1 };
+    const list = [...(ifaces[s.name] || [])].sort((a, b) => {
+      let av, bv;
+      if (st.key === "name") { av = a.name.toLowerCase(); bv = b.name.toLowerCase(); }
+      else { av = a[st.key] || 0; bv = b[st.key] || 0; }
+      if (av < bv) return -st.dir;
+      if (av > bv) return st.dir;
+      return 0;
+    });
+    const cls = k => "sortable" + (k !== "name" ? " num" : "") +
+      (st.key === k ? " active" + (st.dir < 0 ? " sort-desc" : "") : "");
     const rows = list.map(i =>
       `<tr><td class="pname">${esc(i.name)}${i.uplink ? ' <span class="uplink">UPLINK</span>' : ""}` +
       (i.container ? ` <span class="cont">${esc(i.container)}</span>` : "") + `</td>` +
       `<td class="num rx">${fmt(i.rx)}</td><td class="num tx">${fmt(i.tx)}</td></tr>`).join("");
     return `<details class="card" data-server="${esc(s.name)}"${wasOpen[s.name] ? " open" : ""}>` +
-      `<summary>Interfaces · ${esc(s.name)} (${list.length})</summary>` +
-      `<table class="ifacetable"><thead><tr><th>Interface</th><th class="num">rein</th><th class="num">raus</th></tr></thead>` +
-      `<tbody>${rows}</tbody></table></details>`;
+      `<summary>Interfaces · ${esc(s.name)} (${list.length}) <span class="hint">— Kopf klickbar zum Sortieren</span></summary>` +
+      `<table class="ifacetable"><thead><tr>` +
+      `<th class="${cls("name")}" data-key="name">Interface</th>` +
+      `<th class="${cls("rx")}" data-key="rx">rein</th>` +
+      `<th class="${cls("tx")}" data-key="tx">raus</th>` +
+      `</tr></thead><tbody>${rows}</tbody></table></details>`;
   }).join("");
 }
+
+document.getElementById("ifaces").addEventListener("click", e => {
+  const th = e.target.closest("th[data-key]");
+  const det = e.target.closest("details");
+  if (!th || !det) return;
+  const sname = det.dataset.server;
+  const key = th.dataset.key;
+  const st = state.ifaceSort[sname] || { key: "name", dir: 1 };
+  if (st.key === key) st.dir *= -1;
+  else { st.key = key; st.dir = key === "name" ? 1 : -1; }
+  state.ifaceSort[sname] = st;
+  if (state.lastIfaces) {
+    renderIfaces(state.lastIfaces, state.servers.map(n => ({ name: n })));
+  }
+});
 
 /* ---------- Hauptschleife ---------- */
 async function refresh() {
@@ -193,6 +221,7 @@ async function refresh() {
     buildTableHeader(d.servers);
   }
   state.version = d.version || state.version;
+  state.lastIfaces = d.ifaces;
   renderStatusbar(d.servers);
   updateCharts(d.series);
   renderTable(d.table, d.servers);
