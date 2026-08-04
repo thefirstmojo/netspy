@@ -3,7 +3,8 @@
 
 Datenquellen:
   - /proc/net/dev          -> Interface-Zaehler (kumulativ, 64-bit)
-  - `ss -tinp` (inet_diag) -> kumulative Byte-Zaehler pro TCP-Socket inkl. PID
+  - `ss -tinpe` (inet_diag) -> kumulative Byte-Zaehler pro TCP-Socket inkl.
+    PID und Socket-Inode (stabiles Pro-Socket-Tracking, keine Fork-Spikes)
   - /proc/<pid>/comm       -> Prozessname
   - /proc/<pid>/ns/net     -> Zuordnung Prozess -> Container (via Docker-Socket)
   - `bridge fdb show`      -> Zuordnung veth-Interface -> Container (via MAC)
@@ -45,10 +46,15 @@ def load_version() -> str:
 # Fallback-Reihenfolge fuer "Uplink"-Interfaces (wenn UPLINK nicht gesetzt)
 UPLINK_FALLBACK = ["br0", "bond0", "eth0", "enp", "ens", "eno", "eth"]
 
-# ss -tinp Parsing
+# ss -tinpe Parsing (e = extended: Socket-Inode für stabiles Pro-Socket-Tracking)
 _SS_USERS_RE = re.compile(r'users:\(\(("?)([^,)]+),pid=(\d+),fd=\d+')
+_SS_INO_RE = re.compile(r'\bino:(\d+)')
 _SS_ACKED_RE = re.compile(r'bytes_acked:(\d+)')
 _SS_RECV_RE = re.compile(r'bytes_received:(\d+)')
+
+# Physikalische Obergrenze: nichts über 50 GB/s pro Socket ist real
+# (10G-Link = 1,25 GB/s) -> schluckt Zähler-Artefakte
+RATE_CAP = 50e9
 
 # bridge fdb show: "00:11:22:33:44:55 dev vethXXX ..."
 _FDB_RE = re.compile(r"^([0-9a-f:]{17})\s+dev\s+(\S+)")
@@ -58,26 +64,28 @@ EMA = 0.5
 # Prozess bleibt nach letzter Aktivitaet noch N Sekunden in der Liste
 DECAY_S = 6.0
 
-# Beispiel-Ausgabe von `ss -tinp` fuer den Parser-Selbsttest
+# Beispiel-Ausgabe von `ss -tinpe` fuer den Parser-Selbsttest
 _SS_FIXTURE = (
     "ESTAB  0      0       10.10.10.101:445     10.10.10.50:50423  "
-    'users:(("smbd",pid=1234,fd=22))\n'
+    'users:(("smbd",pid=1234,fd=22)) uid:0 ino:11111 sk:1\n'
     "\t cubic wscale:7,7 rto:204 rtt:0.2/0.05 ato:40 mss:1460 pmtu:1500 "
     "cwnd:10 ssthresh:7 bytes_sent:123456 bytes_acked:120000 "
     "bytes_received:987654 segs_out:1034 segs_in:987\n"
     "ESTAB  0      0       10.10.10.101:443     10.10.10.60:40000  "
-    'users:(("nginx",pid=777,fd=9))\n'
+    'users:(("nginx",pid=777,fd=9)) uid:0 ino:22222 sk:2\n'
     "\t cubic wscale:7,7 rto:10 rtt:1/0.5 ato:40 mss:1460 cwnd:10 "
     "bytes_acked:5000 bytes_received:10000\n"
     "LISTEN 0      128     0.0.0.0:8091          0.0.0.0:*  "
-    'users:(("python",pid=42,fd=3))\n'
+    'users:(("python",pid=42,fd=3)) uid:0 ino:33333 sk:3\n'
 )
 
 
 def parse_ss(output: str) -> dict:
-    """Parsed `ss -tinp` Ausgabe -> {pid: [rx_bytes, tx_bytes]} (kumulativ).
+    """Parsed `ss -tinpe` -> {inode: {"pid", "rx", "tx"}} (kumulativ).
 
-    Nur TCP-Sockets mit zugeordnetem PID. rx = bytes_received,
+    Pro-Socket-Tracking über die Socket-Inode: Zähler bleiben stabil, auch
+    wenn ein Socket zwischen Prozessen wandert (z. B. smbd Parent/Kind bei
+    Fork) oder PIDs wiederverwendet werden. rx = bytes_received,
     tx = bytes_acked (vom Peer bestaetigt = tatsaechlich raus).
     """
     res: dict = {}
@@ -85,17 +93,21 @@ def parse_ss(output: str) -> dict:
     for line in output.splitlines():
         m = _SS_USERS_RE.search(line)
         if m:
-            cur = int(m.group(3))
-            res.setdefault(cur, [0, 0])
+            ino_m = _SS_INO_RE.search(line)
+            if not ino_m:
+                cur = None
+                continue
+            cur = int(ino_m.group(1))
+            res.setdefault(cur, {"pid": int(m.group(3)), "rx": 0, "tx": 0})
             continue
         if cur is None:
             continue
         a = _SS_ACKED_RE.search(line)
         r = _SS_RECV_RE.search(line)
         if a:
-            res[cur][1] = int(a.group(1))
+            res[cur]["tx"] = int(a.group(1))
         if r:
-            res[cur][0] = int(r.group(1))
+            res[cur]["rx"] = int(r.group(1))
     return res
 
 
@@ -280,7 +292,7 @@ class Sampler:
     def _run_ss(self):
         try:
             out = subprocess.run(
-                ["ss", "-tinp"], capture_output=True, text=True, timeout=3
+                ["ss", "-tinpe"], capture_output=True, text=True, timeout=3
             )
             if out.returncode != 0:
                 self._ss_error = (out.stderr or f"ss exit {out.returncode}").strip()
@@ -332,17 +344,25 @@ class Sampler:
                 e[1] += rate["tx"]
 
         # --- Per-Prozess-Raten (TCP, roh) ---
+        # Pro-Socket-Tracking über Inodes: verhindert Spikes, wenn ein Socket
+        # zwischen Prozessen wandert (z. B. smbd Parent/Kind bei Fork).
         raw: dict = {}
         proc_cont: dict = {}
         if ss is not None:
-            for pid, (rx, tx) in ss.items():
-                prev = self._prev_ss.get(pid)
+            for ino, s in ss.items():
+                prev = self._prev_ss.get(ino)
                 if prev is None or dt <= 0:
                     continue
-                drx = max(0.0, (rx - prev[0]) / dt)
-                dtx = max(0.0, (tx - prev[1]) / dt)
+                drx = max(0.0, (s["rx"] - prev["rx"]) / dt)
+                dtx = max(0.0, (s["tx"] - prev["tx"]) / dt)
+                # Zähler-Artefakt-Guard (physikalisch unmögliche Raten)
+                if drx > RATE_CAP:
+                    drx = 0.0
+                if dtx > RATE_CAP:
+                    dtx = 0.0
                 if drx <= 0 and dtx <= 0:
                     continue
+                pid = s["pid"]
                 name = self.comm_for(pid)
                 e = raw.setdefault(name, [0.0, 0.0])
                 e[0] += drx
@@ -355,7 +375,7 @@ class Sampler:
             self._prev_ss = ss
 
             # Caches auf lebende PIDs begrenzen
-            alive = set(self._prev_ss.keys())
+            alive = set(s["pid"] for s in ss.values())
             self._comm = {k: v for k, v in self._comm.items() if k in alive}
             self._ns = {k: v for k, v in self._ns.items() if k in alive}
 
@@ -511,10 +531,10 @@ def start_agent(sampler: Sampler, port: int = 8091, token: str = "") -> Threadin
 def _self_test() -> None:
     """Parser-Selbsttest mit Fixture."""
     parsed = parse_ss(_SS_FIXTURE)
-    assert parsed.get(1234) == [987654, 120000], parsed
-    assert parsed.get(777) == [10000, 5000], parsed
-    assert parsed.get(42) == [0, 0], parsed  # LISTEN ohne Zaehler
-    print("parse_ss Selbsttest OK:", parsed)
+    assert parsed.get(11111) == {"pid": 1234, "rx": 987654, "tx": 120000}, parsed
+    assert parsed.get(22222) == {"pid": 777, "rx": 10000, "tx": 5000}, parsed
+    assert parsed.get(33333) == {"pid": 42, "rx": 0, "tx": 0}, parsed  # LISTEN ohne Zaehler
+    print("parse_ss Selbsttest OK (Pro-Socket-Inodes):", parsed)
 
 
 if __name__ == "__main__":
