@@ -1,0 +1,14 @@
+*
+!.gitignore
+!Dockerfile
+!*.py
+!*.html
+!*.css
+!*.js
+!*.svg
+!*.json
+!*.md
+!*.yml
+!*.yaml
+!VERSION
+!.env.example

@@ -106,7 +106,6 @@ td.srv { color: var(--muted); }
 .chip input { margin: 0; cursor: pointer; accent-color: #22d3ee; }
 td.rx { color: var(--rx); }
 td.tx { color: var(--tx); }
-td.total { color: var(--text); font-weight: 600; }
 tbody tr:nth-child(even) { background: rgba(255,255,255,.02); }
 tbody tr:hover { background: rgba(34,211,238,.06); }
 td.pname { font-weight: 500; }

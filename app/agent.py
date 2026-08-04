@@ -24,27 +24,14 @@ import os
 import re
 import socket
 import subprocess
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from shared import load_version
+
 PROC = "/proc"
-
-
-def load_version() -> str:
-    base = os.path.dirname(os.path.abspath(__file__))
-    for p in (os.path.join(base, "VERSION"), os.path.join(base, "..", "VERSION")):
-        try:
-            with open(p) as f:
-                v = f.read().strip()
-                if v:
-                    return v
-        except OSError:
-            continue
-    return "dev"
-
-# Fallback-Reihenfolge fuer "Uplink"-Interfaces (wenn keine Default-Route)
-UPLINK_FALLBACK = ["br0", "bond0", "eth0", "enp", "ens", "eno", "eth"]
 
 
 def parse_route_table(text: str) -> set:
@@ -152,6 +139,8 @@ def read_net_dev() -> dict:
                 continue
             iface, rest = line.split(":", 1)
             fields = rest.split()
+            if len(fields) < 9:
+                continue
             dev[iface.strip()] = (int(fields[0]), int(fields[8]))
     return dev
 
@@ -567,8 +556,8 @@ def sampler_loop(sampler: Sampler, interval: float = 1.0) -> None:
         t0 = time.monotonic()
         try:
             sampler.tick()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[sampler] tick error: {e}", file=sys.stderr)
         time.sleep(max(0.05, interval - (time.monotonic() - t0)))
 
 
@@ -628,7 +617,7 @@ def _self_test() -> None:
         "bond0\t00000000\t0102A8C0\t0003\t0\t0\t0\t00000000\t1500\t0\t0\n"
     )
     assert parse_route_table(route_fix) == {"br0", "bond0"}, parse_route_table(route_fix)
-    print("parse_ss Selbsttest OK (Pro-Socket-Inodes):", parsed)
+    print("parse_ss self-test OK (per-socket inodes):", parsed)
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from agent import Sampler, start_agent
+from shared import load_version
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 MIME = {
@@ -32,19 +33,6 @@ MIME = {
     ".svg": "image/svg+xml",
     ".png": "image/png",
 }
-
-
-def load_version() -> str:
-    base = os.path.dirname(os.path.abspath(__file__))
-    for p in (os.path.join(base, "VERSION"), os.path.join(base, "..", "VERSION")):
-        try:
-            with open(p) as f:
-                v = f.read().strip()
-                if v:
-                    return v
-        except OSError:
-            continue
-    return "dev"
 
 
 VERSION = load_version()
@@ -89,25 +77,26 @@ class Monitor:
             if s["url"] is None:
                 self.sampler = Sampler(uplink=uplink, docker_sock=docker_sock)
 
+    def _poll_one(self, s):
+        """Fetch one server (used by poll_loop in parallel)."""
+        try:
+            if s["url"] is None:
+                snap = self.sampler.snapshot() if self.sampler else None
+            else:
+                snap = self._fetch(s["url"])
+            if snap is None:
+                raise RuntimeError("no local sampler")
+            return s["name"], snap, None
+        except Exception as e:
+            return s["name"], None, str(e)
+
     def poll_loop(self) -> None:
-        """Pollt alle Server PARALLEL (ThreadPool) — skaliert auf N Hosts,
+        """Pollt alle Server PARALLEL — skaliert auf N Hosts,
         ein langsamer Agent blockiert die anderen nicht."""
         workers = max(4, len(self.servers))
         with ThreadPoolExecutor(max_workers=workers) as ex:
             while True:
-                def poll_one(s):
-                    try:
-                        if s["url"] is None:
-                            snap = self.sampler.snapshot() if self.sampler else None
-                        else:
-                            snap = self._fetch(s["url"])
-                        if snap is None:
-                            raise RuntimeError("kein lokaler Sampler")
-                        return s["name"], snap, None
-                    except Exception as e:
-                        return s["name"], None, str(e)
-
-                for name, snap, err in ex.map(poll_one, self.servers):
+                for name, snap, err in ex.map(self._poll_one, self.servers):
                     with self.lock:
                         if snap is not None:
                             self.snaps[name] = snap
@@ -133,10 +122,11 @@ class Monitor:
         with self.lock:
             series = {}
             for name, h in self.history.items():
+                items = list(h)[-300:]  # Frontend uses last 300 points
                 series[name] = {
-                    "ts": [p[0] for p in h],
-                    "rx": [p[1] for p in h],
-                    "tx": [p[2] for p in h],
+                    "ts": [p[0] for p in items],
+                    "rx": [p[1] for p in items],
+                    "tx": [p[2] for p in items],
                 }
 
             # Merge process list across all servers (rows = process/container)
