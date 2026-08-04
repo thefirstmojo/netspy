@@ -1,0 +1,48 @@
+# NetSpy — EINE Compose für Unraid UND TrueNAS.
+# Rolle und Verbindungen werden komplett per Umgebungsvariablen gesteuert
+# (siehe .env.example). Kein Datei-Umbau nötig zwischen den Hosts.
+
+#   Unraid (Dashboard + lokaler Sampler):
+#     ROLE=web
+#     SERVERS="Unraid=local;TrueNAS=http://10.10.10.100:8091"
+#     -> docker compose up -d --build
+#
+#   TrueNAS (nur Collector, via Portainer):
+#     ROLE=agent
+#     SERVERS=""
+#     -> Portainer: Stacks -> Add stack -> Repository (dieses Repo) -> Env-Vars setzen
+
+services:
+  netspy:
+    build: .
+    image: ${NETSPY_IMAGE:-netspy:latest}
+    container_name: ${NETSPY_CONTAINER:-netspy}
+    restart: unless-stopped
+
+    # Host-Netzwerk + Host-PID-Namespace: damit /proc und ss die echten
+    # Host-Daten sehen (Container läuft als root).
+    network_mode: host
+    pid: host
+    cap_drop: [ALL]
+    # SYS_PTRACE: nötig, damit auch Prozesse anderer UIDs (nicht-root)
+    # per /proc/<pid>/fd den Sockets zugeordnet werden können.
+    cap_add: [SYS_PTRACE]
+
+    environment:
+      ROLE: ${ROLE:-web}
+      SERVERS: ${SERVERS:-Unraid=local}
+      UPLINK: ${UPLINK:-br0}
+      WEB_PORT: ${WEB_PORT:-8090}
+      AGENT_PORT: ${AGENT_PORT:-8091}
+      AGENT_TOKEN: ${AGENT_TOKEN:-}
+
+    volumes:
+      # Nur auf Unraid vorhanden -> Prozess zu Container-Namen.
+      # optional: true = Mount wird übersprungen, wenn der Socket fehlt
+      # (z. B. auf TrueNAS). Bei sehr alten Compose-Versionen ohne
+      # optional-Support: diesen Block auf TrueNAS einfach löschen.
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        read_only: true
+        optional: true
