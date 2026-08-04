@@ -1,19 +1,20 @@
-# NetSpy — EINE Compose für Unraid UND TrueNAS.
-# Rolle und Verbindungen werden komplett per Umgebungsvariablen gesteuert
-# (siehe .env.example). Kein Datei-Umbau nötig zwischen den Hosts.
+# NetSpy — ONE compose for Unraid AND TrueNAS.
+# Role and connections are fully controlled by environment variables
+# (see .env.example). No file changes needed between hosts.
 
-#   Unraid (Dashboard + lokaler Sampler):
+#   Unraid (dashboard + local sampler):
 #     ROLE=web
-#     SERVERS="Unraid=local;TrueNAS=http://10.10.10.100:8091"
-#     -> docker compose up -d   (pullt ghcr.io/thefirstmojo/netspy:latest, public)
+#     SERVERS="Unraid=local;TrueNAS=http://10.10.10.20:8091"
+#     -> docker compose up -d   (pulls ghcr.io/thefirstmojo/netspy:latest, public)
 #
-#   TrueNAS (nur Collector, via Portainer):
+#   TrueNAS (collector only, via Portainer):
 #     ROLE=agent
 #     SERVERS=""
-#     -> Portainer: Stacks -> Add stack -> Repository (dieses Repo) -> Env-Vars setzen
+#     -> Portainer: Stacks -> Add stack -> Repository (this repo) -> set Env Vars
+#     -> add: security_opt: [apparmor:unconfined]  (required for process rows)
 #
-#   Lokal bauen (nur für Entwicklung): docker build -t netspy:latest .
-#   und dann NETSPY_IMAGE=netspy:latest setzen.
+#   Local build (development only): docker build -t netspy:latest .
+#   and then set NETSPY_IMAGE=netspy:latest.
 
 services:
   netspy:
@@ -21,13 +22,13 @@ services:
     container_name: ${NETSPY_CONTAINER:-netspy}
     restart: unless-stopped
 
-    # Host-Netzwerk + Host-PID-Namespace: damit /proc und ss die echten
-    # Host-Daten sehen (Container läuft als root).
+    # Host network + host PID namespace: so /proc and ss see the real host
+    # data (container runs as root).
     network_mode: host
     pid: host
     cap_drop: [ALL]
-    # SYS_PTRACE: nötig, damit auch Prozesse anderer UIDs (nicht-root)
-    # per /proc/<pid>/fd den Sockets zugeordnet werden können.
+    # SYS_PTRACE: needed so sockets of non-root processes can be attributed
+    # via /proc/<pid>/fd.
     cap_add: [SYS_PTRACE]
 
     environment:
@@ -38,10 +39,10 @@ services:
       AGENT_PORT: ${AGENT_PORT:-8091}
       AGENT_TOKEN: ${AGENT_TOKEN:-}
 
-    # OPTIONAL — EMPFOHLEN auf Unraid: aktiviert die Container-Zeilen
-    # (Prozess -> Container-Name und veth -> Container in der Prozessliste).
-    # Diese 3 Zeilen einkommentieren. Standardmaessig AUS, damit die Datei
-    # auf jeder Compose-Version (Unraid/TrueNAS/Portainer) valide ist.
-    # Auf TrueNAS NICHT aktivieren, dort existiert kein Docker-Socket.
+    # OPTIONAL — RECOMMENDED on Unraid: enables container rows
+    # (process -> container name and veth -> container in the process list).
+    # Uncomment these 3 lines. Off by default so the file stays valid on
+    # every compose version (Unraid/TrueNAS/Portainer).
+    # Do NOT enable on TrueNAS, there is no Docker socket.
     # volumes:
     #   - /var/run/docker.sock:/var/run/docker.sock:ro

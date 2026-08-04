@@ -66,12 +66,12 @@ DECAY_S = 6.0
 
 # Beispiel-Ausgabe von `ss -tinpe` fuer den Parser-Selbsttest
 _SS_FIXTURE = (
-    "ESTAB  0      0       10.10.10.101:445     10.10.10.50:50423  "
+    "ESTAB  0      0       10.10.10.10:445     10.10.10.50:50423  "
     'users:(("smbd",pid=1234,fd=22)) uid:0 ino:11111 sk:1\n'
     "\t cubic wscale:7,7 rto:204 rtt:0.2/0.05 ato:40 mss:1460 pmtu:1500 "
     "cwnd:10 ssthresh:7 bytes_sent:123456 bytes_acked:120000 "
     "bytes_received:987654 segs_out:1034 segs_in:987\n"
-    "ESTAB  0      0       10.10.10.101:443     10.10.10.60:40000  "
+    "ESTAB  0      0       10.10.10.10:443     10.10.10.60:40000  "
     'users:(("nginx",pid=777,fd=9)) uid:0 ino:22222 sk:2\n'
     "\t cubic wscale:7,7 rto:10 rtt:1/0.5 ato:40 mss:1460 cwnd:10 "
     "bytes_acked:5000 bytes_received:10000\n"

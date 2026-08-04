@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""NetMon-Web: Dashboard-Server (Polling, Ringbuffer, statisches Frontend).
+"""NetSpy-Web: dashboard server (polling, ring buffer, static frontend).
 
-ROLE=web: bedient die Web-UI (:8090), pollt lokale/remote Agenten und
-stellt optional selbst eine Agent-API (:8091) bereit, wenn ein lokaler
-Sampler aktiv ist (SERVERS enthaelt "X=local").
+ROLE=web: serves the web UI (:8090), polls local/remote agents and
+optionally exposes an agent API (:8091) when a local sampler is active
+(SERVERS contains "X=local").
 
-Konfiguration (Env):
-  SERVERS     "Unraid=local;TrueNAS=http://10.10.10.100:8091"
-  UPLINK      "br0"                (kommagetrennt, leer = Auto)
-  DOCKER_SOCK "/var/run/docker.sock"  (leer = deaktiviert)
-  AGENT_TOKEN ""                   (optional, gemeinsames Token)
+Configuration (env):
+  SERVERS     "Unraid=local;TrueNAS=http://10.10.10.20:8091"  (example IPs)
+  UPLINK      "br0"                (comma-separated, empty = auto)
+  DOCKER_SOCK "/var/run/docker.sock"  (empty = disabled)
+  AGENT_TOKEN ""                   (optional, shared token)
 """
 from __future__ import annotations
 
