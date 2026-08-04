@@ -429,7 +429,15 @@ class Sampler:
         for name, ema in self._ema.items():
             last = self._active.get(name, 0.0)
             if ema["rx"] > 0.0 or ema["tx"] > 0.0 or (mono - last) < DECAY_S:
-                emitted[name] = ema
+                # EMA-Nachlauf an aktuelle Host-Rate klemmen: ein Prozess wird
+                # nie schneller angezeigt als der Host insgesamt empfängt/sendet
+                if link_cap > 0:
+                    emitted[name] = {
+                        "rx": min(ema["rx"], link_cap),
+                        "tx": min(ema["tx"], link_cap),
+                    }
+                else:
+                    emitted[name] = ema
         self._ema = {k: v for k, v in self._ema.items() if k in emitted}
         self._active = {k: v for k, v in self._active.items() if k in emitted}
 
