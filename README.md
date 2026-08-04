@@ -99,8 +99,8 @@ All values are set **directly in `docker-compose.yml`** (no `.env` file):
 | `ROLE` | `web` | `web` or `agent` |
 | `SERVERS` | `Main=local` | `Name=local;Name=http://host:8091` |
 | `UPLINK` | auto (default route) | Comma-separated override, e.g. `br0,bond0` |
-| `WEB_PORT` | `8090` | Web UI |
-| `AGENT_PORT` | `8091` | Agent API |
+| `WEB_PORT` | `8090` | Host port of the web UI (host networking — the value IS the external port) |
+| `AGENT_PORT` | `8091` | Host port of the agent API (same) |
 | `AGENT_TOKEN` | empty | Header `X-Agent-Token` (must match on all hosts) |
 | `DOCKER_SOCK` | `/var/run/docker.sock` (web) | Docker socket for container rows; `""` disables |
 
