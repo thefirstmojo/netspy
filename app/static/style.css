@@ -46,7 +46,7 @@ header {
 .statname small { color: var(--muted); font-weight: 400; }
 .statnums { display: flex; gap: 8px; font-variant-numeric: tabular-nums; }
 /* Feste Breite fuer die Zahlenbereiche: kein Springen bei wechselnden Raten */
-.statnums span { display: inline-block; min-width: 120px; text-align: right; white-space: nowrap; }
+.statnums span { display: inline-block; width: 125px; text-align: right; white-space: nowrap; }
 .statnums .rx, .lg.rx { color: var(--rx); }
 .statnums .tx, .lg.tx { color: var(--tx); }
 .stat .err { color: var(--bad); font-size: 11px; }
@@ -64,11 +64,11 @@ main { padding: 16px 20px; max-width: 1400px; margin: 0 auto; }
 .charthead { display: flex; justify-content: space-between; align-items: center; }
 .chartwrap { position: relative; height: 220px; }
 .chartlegend { display: flex; gap: 16px; margin-top: 8px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.chartlegend .lg { min-width: 120px; text-align: right; }
+.chartlegend .lg { width: 150px; text-align: right; white-space: nowrap; }
 
 .badge { font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); white-space: nowrap; }
 /* Feste Breite fuer die Zahlenbereiche im Badge (kein Springen) */
-.badge .bn { display: inline-block; min-width: 105px; text-align: right; font-variant-numeric: tabular-nums; }
+.badge .bn { display: inline-block; width: 110px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .badge.ok { color: var(--ok); border-color: rgba(34,197,94,.4); }
 .badge.bad { color: var(--bad); border-color: rgba(239,68,68,.4); }
 
