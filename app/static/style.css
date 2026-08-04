@@ -67,7 +67,8 @@ main { padding: 16px 20px; max-width: 1400px; margin: 0 auto; }
 .badge.ok { color: var(--ok); border-color: rgba(34,197,94,.4); }
 .badge.bad { color: var(--bad); border-color: rgba(239,68,68,.4); }
 
-.tablewrap { overflow-x: auto; max-height: 520px; overflow-y: auto; }
+/* Keine Scrollbar: alle Zeilen werden angezeigt (max-height bewusst entfernt) */
+.tablewrap { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; }
 th, td { padding: 7px 10px; text-align: left; white-space: nowrap; }
 thead th {
