@@ -1,7 +1,10 @@
 /* NetMon Frontend — Charts + sortierbare Prozessliste, 1s Refresh */
 "use strict";
 
-const state = { sortKey: "total", sortDir: -1, servers: [], charts: {}, ifaceSort: {}, lastIfaces: null };
+const state = {
+  sortKey: "rx", sortDir: -1, servers: [], charts: {},
+  ifaceSort: {}, lastIfaces: null, lastTable: [], visible: {},
+};
 
 const COLORS = { rx: "#22d3ee", tx: "#f59e0b" };
 
@@ -111,53 +114,89 @@ function renderStatusbar(servers) {
   }
 }
 
-/* ---------- Prozess-Tabelle ---------- */
+/* ---------- Server-Filter (Checkbox-Chips: Tabelle + Charts) ---------- */
+function buildServerFilter(servers) {
+  const bar = document.getElementById("serverfilter");
+  bar.innerHTML = "";
+  servers.forEach(s => { if (!(s.name in state.visible)) state.visible[s.name] = true; });
+
+  const all = document.createElement("label");
+  all.className = "chip";
+  all.innerHTML = `<input type="checkbox" checked><span>Alle</span>`;
+  all.querySelector("input").addEventListener("change", e => {
+    const v = e.target.checked;
+    servers.forEach(s => state.visible[s.name] = v);
+    bar.querySelectorAll("input[data-srv]").forEach(i => i.checked = v);
+    applyVisibility();
+  });
+  bar.appendChild(all);
+
+  for (const s of servers) {
+    const lab = document.createElement("label");
+    lab.className = "chip";
+    lab.innerHTML = `<input type="checkbox" data-srv="${esc(s.name)}" checked><span>${esc(s.name)}</span>`;
+    lab.querySelector("input").addEventListener("change", e => {
+      state.visible[s.name] = e.target.checked;
+      applyVisibility();
+    });
+    bar.appendChild(lab);
+  }
+}
+
+function applyVisibility() {
+  for (const name of state.servers) {
+    const card = document.getElementById("chart-" + name.replace(/[^a-zA-Z0-9]/g, "_"));
+    if (card) card.style.display = state.visible[name] ? "" : "none";
+  }
+  if (state.lastTable) renderTable(state.lastTable, state.servers.map(n => ({ name: n })));
+}
+
+/* ---------- Prozess-Tabelle: eine Zeile pro (Prozess x Server) ---------- */
 function buildTableHeader(servers) {
   const thead = document.getElementById("procthead");
-  let html = `<tr><th data-key="name" class="sortable ${state.sortKey === "name" ? "active" : ""}">Prozess</th>`;
-  for (const s of servers) {
-    const kIn = "in:" + s.name, kOut = "out:" + s.name;
-    const clsIn = state.sortKey === kIn ? "active" + (state.sortDir < 0 ? " sort-desc" : "") : "";
-    const clsOut = state.sortKey === kOut ? "active" + (state.sortDir < 0 ? " sort-desc" : "") : "";
-    html += `<th data-key="${kIn}" class="sortable num ${clsIn}">${esc(s.name)}<br><span class="sub">rein ▼</span></th>`;
-    html += `<th data-key="${kOut}" class="sortable num ${clsOut}">${esc(s.name)}<br><span class="sub">raus ▲</span></th>`;
-  }
-  html += `<th data-key="total" class="sortable num ${state.sortKey === "total" ? "active" : ""}">Total</th>`;
-  thead.innerHTML = html;
+  const cls = k => "sortable" +
+    (state.sortKey === k ? " active" + (state.sortDir < 0 ? " sort-desc" : "") : "");
+  thead.innerHTML = `<tr>` +
+    `<th data-key="name" class="${cls("name")}">Prozess</th>` +
+    `<th data-key="server" class="${cls("server")}">Server</th>` +
+    `<th data-key="rx" class="sortable num ${state.sortKey === "rx" ? "active" + (state.sortDir < 0 ? " sort-desc" : "") : ""}">rein</th>` +
+    `<th data-key="tx" class="sortable num ${state.sortKey === "tx" ? "active" + (state.sortDir < 0 ? " sort-desc" : "") : ""}">raus</th>` +
+    `</tr>`;
 }
 
 function renderTable(table, servers) {
   const tbody = document.getElementById("proctbody");
-  const rows = [...table].sort((a, b) => {
-    let av, bv;
-    if (state.sortKey === "name") { av = a.name.toLowerCase(); bv = b.name.toLowerCase(); }
-    else if (state.sortKey === "total") { av = a.total; bv = b.total; }
-    else {
-      const [dir, sname] = state.sortKey.split(":");
-      av = (a.hosts[sname] || {})[dir === "in" ? "rx" : "tx"] || 0;
-      bv = (b.hosts[sname] || {})[dir === "in" ? "rx" : "tx"] || 0;
+  const rows = [];
+  for (const r of table) {
+    for (const sname of Object.keys(r.hosts || {})) {
+      if (!state.visible[sname]) continue;
+      rows.push({ r, sname });
     }
-    if (av < bv) return -1 * state.sortDir;
-    if (av > bv) return 1 * state.sortDir;
+  }
+  rows.sort((a, b) => {
+    let av, bv;
+    const ha = a.r.hosts[a.sname] || {}, hb = b.r.hosts[b.sname] || {};
+    if (state.sortKey === "name") { av = a.r.name.toLowerCase(); bv = b.r.name.toLowerCase(); }
+    else if (state.sortKey === "server") { av = a.sname.toLowerCase(); bv = b.sname.toLowerCase(); }
+    else if (state.sortKey === "rx") { av = ha.rx || 0; bv = hb.rx || 0; }
+    else if (state.sortKey === "tx") { av = ha.tx || 0; bv = hb.tx || 0; }
+    else { av = (ha.rx || 0) + (ha.tx || 0); bv = (hb.rx || 0) + (hb.tx || 0); }
+    if (av < bv) return -state.sortDir;
+    if (av > bv) return state.sortDir;
     return 0;
   });
 
-  tbody.innerHTML = rows.map(r => {
+  tbody.innerHTML = rows.map(({ r, sname }) => {
     const isRest = r.kind === "rest";
     let badge = "";
     if (r.kind === "container") badge = `<span class="cont">Container</span>`;
     else if (r.container) badge = `<span class="cont">${esc(r.container)}</span>`;
-    let cells = `<td class="pname${isRest ? " rest" : ""}">${esc(r.name)}${badge}</td>`;
-    let total = 0;
-    for (const s of servers) {
-      const h = r.hosts[s.name];
-      const rx = h ? h.rx : null, tx = h ? h.tx : null;
-      cells += `<td class="num rx">${rx == null ? "–" : fmt(rx)}</td>`;
-      cells += `<td class="num tx">${tx == null ? "–" : fmt(tx)}</td>`;
-      total += (rx || 0) + (tx || 0);
-    }
-    cells += `<td class="num total">${fmt(total)}</td>`;
-    return `<tr${isRest ? ' class="restrow"' : ""}>${cells}</tr>`;
+    const h = r.hosts[sname] || {};
+    return `<tr${isRest ? ' class="restrow"' : ""}>` +
+      `<td class="pname${isRest ? " rest" : ""}">${esc(r.name)}${badge}</td>` +
+      `<td class="srv">${esc(sname)}</td>` +
+      `<td class="num rx">${h.rx == null ? "–" : fmt(h.rx)}</td>` +
+      `<td class="num tx">${h.tx == null ? "–" : fmt(h.tx)}</td></tr>`;
   }).join("");
 }
 
@@ -227,9 +266,11 @@ async function refresh() {
       state.servers.some((n, i) => n !== d.servers[i].name)) {
     buildCharts(d.servers);
     buildTableHeader(d.servers);
+    buildServerFilter(d.servers);
   }
   state.version = d.version || state.version;
   state.lastIfaces = d.ifaces;
+  state.lastTable = d.table;
   renderStatusbar(d.servers);
   updateCharts(d.series);
   renderTable(d.table, d.servers);
@@ -241,8 +282,9 @@ document.getElementById("procthead").addEventListener("click", e => {
   if (!th) return;
   const key = th.dataset.key;
   if (state.sortKey === key) state.sortDir *= -1;
-  else { state.sortKey = key; state.sortDir = key === "name" ? 1 : -1; }
+  else { state.sortKey = key; state.sortDir = key === "name" || key === "server" ? 1 : -1; }
   buildTableHeader(state.servers.map(n => ({ name: n })));
+  if (state.lastTable) renderTable(state.lastTable, state.servers.map(n => ({ name: n })));
 });
 
 refresh();

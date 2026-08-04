@@ -19,6 +19,7 @@ import threading
 import time
 import urllib.request
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from agent import Sampler, start_agent
@@ -89,27 +90,36 @@ class Monitor:
                 self.sampler = Sampler(uplink=uplink, docker_sock=docker_sock)
 
     def poll_loop(self) -> None:
-        while True:
-            for s in self.servers:
-                try:
-                    if s["url"] is None:
-                        snap = self.sampler.snapshot() if self.sampler else None
-                    else:
-                        snap = self._fetch(s["url"])
-                    if snap is None:
-                        raise RuntimeError("kein lokaler Sampler")
+        """Pollt alle Server PARALLEL (ThreadPool) — skaliert auf N Hosts,
+        ein langsamer Agent blockiert die anderen nicht."""
+        workers = max(4, len(self.servers))
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            while True:
+                def poll_one(s):
+                    try:
+                        if s["url"] is None:
+                            snap = self.sampler.snapshot() if self.sampler else None
+                        else:
+                            snap = self._fetch(s["url"])
+                        if snap is None:
+                            raise RuntimeError("kein lokaler Sampler")
+                        return s["name"], snap, None
+                    except Exception as e:
+                        return s["name"], None, str(e)
+
+                for name, snap, err in ex.map(poll_one, self.servers):
                     with self.lock:
-                        self.snaps[s["name"]] = snap
-                        self.online[s["name"]] = True
-                        self.errors[s["name"]] = ""
-                        self.history[s["name"]].append(
-                            (snap["ts"], snap["totals"]["rx"], snap["totals"]["tx"])
-                        )
-                except Exception as e:
-                    with self.lock:
-                        self.online[s["name"]] = False
-                        self.errors[s["name"]] = str(e)
-            time.sleep(1.0)
+                        if snap is not None:
+                            self.snaps[name] = snap
+                            self.online[name] = True
+                            self.errors[name] = ""
+                            self.history[name].append(
+                                (snap["ts"], snap["totals"]["rx"], snap["totals"]["tx"])
+                            )
+                        else:
+                            self.online[name] = False
+                            self.errors[name] = err or ""
+                time.sleep(1.0)
 
     def _fetch(self, url: str) -> dict:
         req = urllib.request.Request(url.rstrip("/") + "/api/metrics")
