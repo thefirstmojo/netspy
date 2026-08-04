@@ -115,6 +115,14 @@ function renderStatusbar(servers) {
 }
 
 /* ---------- Server-Filter (Checkbox-Chips: Tabelle + Charts) ---------- */
+function syncAllChip(bar, servers) {
+  const allCb = bar.querySelector("input[data-all]");
+  if (!allCb) return;
+  const n = servers.filter(s => state.visible[s.name]).length;
+  allCb.checked = n === servers.length;
+  allCb.indeterminate = n > 0 && n < servers.length;
+}
+
 function buildServerFilter(servers) {
   const bar = document.getElementById("serverfilter");
   bar.innerHTML = "";
@@ -122,11 +130,12 @@ function buildServerFilter(servers) {
 
   const all = document.createElement("label");
   all.className = "chip";
-  all.innerHTML = `<input type="checkbox" checked><span>All</span>`;
+  all.innerHTML = `<input type="checkbox" data-all checked><span>All</span>`;
   all.querySelector("input").addEventListener("change", e => {
     const v = e.target.checked;
     servers.forEach(s => state.visible[s.name] = v);
     bar.querySelectorAll("input[data-srv]").forEach(i => i.checked = v);
+    syncAllChip(bar, servers);
     applyVisibility();
   });
   bar.appendChild(all);
@@ -137,6 +146,7 @@ function buildServerFilter(servers) {
     lab.innerHTML = `<input type="checkbox" data-srv="${esc(s.name)}" checked><span>${esc(s.name)}</span>`;
     lab.querySelector("input").addEventListener("change", e => {
       state.visible[s.name] = e.target.checked;
+      syncAllChip(bar, servers);
       applyVisibility();
     });
     bar.appendChild(lab);
