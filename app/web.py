@@ -169,6 +169,7 @@ class Monitor:
                         "hostname": (self.snaps.get(s["name"]) or {}).get("hostname", ""),
                         "totals": (self.snaps.get(s["name"]) or {}).get("totals",
                                                                         {"rx": 0.0, "tx": 0.0}),
+                        "docker": (self.snaps.get(s["name"]) or {}).get("docker"),
                     }
                     for s in self.servers
                 ],
