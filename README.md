@@ -1,7 +1,7 @@
-# NetSpy — Live network monitoring for Unraid + TrueNAS
+# NetSpy — Live network monitoring for Unraid + other servers
 
 Web dashboard showing **interface and per-process network throughput** of Unraid
-and TrueNAS in real time (1 s sampling). **One image, two roles, one compose.**
+and other servers in real time (1 s sampling). **One image, two roles, one compose.**
 
 > **⚠️ Must run with `network_mode: host`** (host networking). The sampler needs
 > the host's `/proc` and `ss` data to measure real host traffic — in bridge mode
@@ -30,6 +30,32 @@ Everything is driven by **one `docker-compose.yml`** — all configuration lives
 directly in the file, **no `.env` file required**. `ROLE` decides what the
 container does, `SERVERS` tells the dashboard where the connections go. Copy
 the compose to each host and adjust the values there.
+
+**Server-agent principle:** the web instance (server) polls every agent once
+per second over HTTP. Agents never push or initiate connections — they only
+answer `/api/metrics` requests on their port. A dashboard that cannot reach an
+agent simply marks it offline; the other hosts keep working.
+
+## Security
+
+- **Server-agent:** the web dashboard polls agents via **plain HTTP**. Agents
+  never initiate connections in the other direction.
+- **Authentication:** one shared `AGENT_TOKEN` (sent as the `X-Agent-Token`
+  header) is the only access control on the agent API. It authenticates
+  requests, but it **does not encrypt anything**.
+- **No TLS:** all traffic between dashboard and agents is **unencrypted** —
+  rates, process names and container names are readable on the wire. **Use
+  only inside a trusted local network.** Do not expose ports 8090/8091 to the
+  internet without a VPN or a TLS-terminating reverse proxy in front.
+- **Host access:** agents run with host networking/PID and optionally the
+  Docker socket to read `/proc` and `ss` — they see host process and socket
+  data. Only run them on hosts you control.
+- **Logs:** the token is only compared against the request header; it is never
+  written to logs or responses.
+
+**Disclaimer:** this software is provided "as is", without warranty of any
+kind, express or implied. The author is not liable for any damages or losses
+arising from its use. Use at your own risk.
 
 ## Deploy on Unraid
 
