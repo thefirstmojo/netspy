@@ -5,6 +5,9 @@
 Web dashboard showing **interface and per-process network throughput** of Unraid
 and other servers in real time (1 s sampling). **One image, two roles, one compose.**
 
+![NetSpy dashboard](docs/screenshot.png)
+*Screenshot shows synthetic demo data (two servers "Main"/"Backup") — no real hosts or containers.*
+
 > **⚠️ Must run with `network_mode: host`** (host networking). The sampler needs
 > the host's `/proc` and `ss` data to measure real host traffic — in bridge mode
 > it would only see the container's own interfaces.
