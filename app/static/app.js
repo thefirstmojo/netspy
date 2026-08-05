@@ -117,12 +117,15 @@ document.getElementById("scalebtn").addEventListener("click", () => {
 /* ---------- Prozess-Detail-Grafik (Klick auf Tabellen-Zeile) ---------- */
 function renderDetailCharts() {
   const grid = document.getElementById("procdetail");
-  // Nicht mehr ausgewaehlte Server-Charts zerstoeren
+  // Nicht mehr ausgewaehlte Server: Chart zerstoeren + DOM-Karte entfernen
   for (const s of Object.keys(state.detailCharts)) {
     if (!(s in state.detailProcs)) {
       if (state.detailCharts[s]) state.detailCharts[s].destroy();
       delete state.detailCharts[s];
     }
+  }
+  for (const card of [...grid.querySelectorAll(".chartcard")]) {
+    if (!(card.dataset.detail in state.detailProcs)) card.remove();
   }
   const servers = state.servers.filter(s => s in state.detailProcs);
   if (servers.length === 0) {
@@ -158,7 +161,17 @@ function renderDetailCharts() {
           { label: "in", data: [], borderColor: COLORS.rx, backgroundColor: "rgba(34,211,238,.12)", fill: true, tension: .3, pointRadius: 0, borderWidth: 2 },
           { label: "out", data: [], borderColor: COLORS.tx, backgroundColor: "rgba(245,158,11,.12)", fill: true, tension: .3, pointRadius: 0, borderWidth: 2 }
         ]},
-        options: { scales: { y: { min: 0 } }, animation: false, responsive: true }
+        options: {
+          animation: false,
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { color: "#64748b", maxTicksLimit: 6, maxRotation: 0 }, grid: { color: "rgba(255,255,255,.05)" } },
+            y: { min: 0, ticks: { color: "#64748b", callback: v => fmt(v) }, grid: { color: "rgba(255,255,255,.05)" }, beginAtZero: true },
+          },
+          interaction: { intersect: false, mode: "index" },
+        }
       });
       state.detailCharts[s] = ch;
     }
