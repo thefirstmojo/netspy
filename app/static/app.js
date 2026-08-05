@@ -2,7 +2,7 @@
 "use strict";
 
 const state = {
-  sortKey: "rx", sortDir: -1, servers: [], charts: {},
+  sortKey: "name", sortDir: 1, servers: [], charts: {},
   ifaceSort: {}, lastIfaces: null, lastTable: [], visible: {},
   equalScale: false, lastSeries: null,
 };
