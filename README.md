@@ -46,6 +46,8 @@ agent simply marks it offline; the other hosts keep working.
 
 ## Security
 
+**Network (threat model):**
+
 - **Server-agent:** the web dashboard polls agents via **plain HTTP**. Agents
   never initiate connections in the other direction.
 - **Authentication:** one shared `AGENT_TOKEN` (sent as the `X-Agent-Token`
@@ -55,25 +57,43 @@ agent simply marks it offline; the other hosts keep working.
   rates, process names and container names are readable on the wire. **Use
   only inside a trusted local network.** Do not expose ports 8090/8091 to the
   internet without a VPN or a TLS-terminating reverse proxy in front.
-- **Host access:** agents run with host networking/PID and optionally the
-  Docker socket to read `/proc` and `ss` — they see host process and socket
-  data. Only run them on hosts you control.
-- **Logs:** the token is only compared against the request header; it is never
-  written to logs or responses.
+
+**Container hardening:**
+
+- `pid: host` + root are required to read foreign PIDs (`/proc`, `ss`).
+- Mitigated by: `cap_drop: [ALL]` with only `SYS_PTRACE` added, and the
+  Docker socket mounted read-only and only on demand (off by default).
+- Set `AGENT_TOKEN` so the agent API isn't openly reachable on your LAN.
+- On TrueNAS, `security_opt: [apparmor:unconfined]` is the minimal relaxation
+  (AppArmor profile only) instead of `privileged: true`.
+
+**Logs:** the token is only compared against the request header; it is never
+written to logs or responses.
 
 **Disclaimer:** this software is provided "as is", without warranty of any
 kind, express or implied. The author is not liable for any damages or losses
 arising from its use. Use at your own risk.
 
-## Deploy on Unraid
+## Deploy on Unraid (Community Apps GUI)
 
-```bash
-git clone https://github.com/thefirstmojo/netspy.git && cd netspy
-# edit docker-compose.yml: ROLE=web, SERVERS, UPLINK=br0, AGENT_TOKEN,
-# uncomment the Docker-socket volume for per-container rows
-docker compose up -d                # pulls ghcr.io/thefirstmojo/netspy:latest (public)
-# UI: http://10.10.10.10:8090
-```
+Install over the **Unraid GUI** — no shell access needed:
+
+1. **Apps → Settings** (gear icon) → **Template Repositories** → add
+   `https://github.com/thefirstmojo/netspy` (once listed in the Community
+   App Store, NetSpy shows up in Apps directly — no repository needed).
+2. **Apps → NetSpy → Install**.
+3. Set the fields in the GUI:
+   - `SERVERS` — e.g. `Unraid=local` (add agents with
+     `;TrueNAS=http://10.10.10.20:8091`)
+   - `AGENT_TOKEN` — a long random value (masked field)
+   - Ports, `UPLINK` (empty = auto) and the Docker socket mount come with
+     sensible defaults and rarely need changes.
+4. Open the dashboard via the **WebUI** button.
+
+All variables are editable later under **Docker → NetSpy → edit**. The
+`docker-compose.yml` in this repo remains the distribution channel for hosts
+**without** the Unraid GUI (agents on TrueNAS/Debian via Portainer) — see next
+section.
 
 ## Deploy on another host as agent (TrueNAS via Portainer, Debian, …)
 
@@ -92,7 +112,7 @@ docker compose up -d                # pulls ghcr.io/thefirstmojo/netspy:latest (
    `X-Agent-Token` header)
 
 > **Version pinning:** Portainer caches images. Pin the tag
-> (`image: ghcr.io/thefirstmojo/netspy:v0.3.11`) for deterministic updates —
+> (`image: ghcr.io/thefirstmojo/netspy:v0.3.22`) for deterministic updates —
 > a new tag always forces a fresh pull. With `:latest`, tick **"Pull latest
 > image"** when updating the stack, otherwise the old image keeps running.
 
@@ -157,15 +177,6 @@ Plus two commented option blocks in the compose, enabled per host:
 - **AppArmor** (`security_opt: [apparmor:unconfined]`) — hosts that enforce an
   AppArmor container profile (TrueNAS, Debian with AppArmor)
 - **Docker socket volume** — hosts with a Docker socket, for per-container rows
-
-## Security
-
-- `pid: host` + root is required to read foreign PIDs.
-- Mitigated by: `cap_drop: [ALL]`, only `SYS_PTRACE` added, Docker socket
-  read-only and mounted only on demand (off by default).
-- Set `AGENT_TOKEN` so the agent isn't openly reachable on your LAN.
-- On TrueNAS, `security_opt: [apparmor:unconfined]` is the minimal relaxation
-  (AppArmor profile only) instead of `privileged: true`.
 
 ## Known limits (by design)
 
