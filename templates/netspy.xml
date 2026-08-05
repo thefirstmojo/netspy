@@ -7,7 +7,15 @@
   <Name>NetSpy</Name>
   <Description>Live network monitoring: per-interface, per-process and per-container throughput with 1s sampling.</Description>
   <Overview>Web dashboard showing real-time network throughput of Unraid (and other hosts): interface rates, per-process breakdown, per-container traffic. One image, two roles — this template installs the web role; add agents on other hosts (TrueNAS/Debian) via the repo's docker-compose.yml.</Overview>
-  <Category>Network:Tools:</Category>
+  <Category>Network:Tools</Category>
+  <ExtraSearchTerms>network monitor traffic throughput dashboard</ExtraSearchTerms>
+  <ReadMe>https://raw.githubusercontent.com/thefirstmojo/netspy/main/README.md</ReadMe>
+  <MinVer>6.9</MinVer>
+  <MaxVer>7.3</MaxVer>
+  <License>MIT</License>
+  <Screenshot>https://raw.githubusercontent.com/thefirstmojo/netspy/main/docs/screenshot.png</Screenshot>
+  <Date>2026-08-05</Date>
+  <Changes>Initial release</Changes>
   <Repository>ghcr.io/thefirstmojo/netspy:latest</Repository>
   <Registry>https://github.com/users/thefirstmojo/packages/container/package/netspy</Registry>
   <Support>https://github.com/thefirstmojo/netspy/issues</Support>
