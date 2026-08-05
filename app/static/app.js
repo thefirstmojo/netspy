@@ -5,6 +5,7 @@ const state = {
   sortKey: "name", sortDir: 1, servers: [], charts: {},
   ifaceSort: {}, lastIfaces: null, lastTable: [], visible: {},
   equalScale: false, lastSeries: null,
+  detailProcs: {}, detailCharts: {},   // server -> {proc, chart}
 };
 
 const COLORS = { rx: "#22d3ee", tx: "#f59e0b" };
@@ -113,6 +114,83 @@ document.getElementById("scalebtn").addEventListener("click", () => {
   if (state.lastSeries) updateCharts(state.lastSeries);
 });
 
+/* ---------- Prozess-Detail-Grafik (Klick auf Tabellen-Zeile) ---------- */
+function renderDetailCharts() {
+  const grid = document.getElementById("procdetail");
+  // Nicht mehr ausgewaehlte Server-Charts zerstoeren
+  for (const s of Object.keys(state.detailCharts)) {
+    if (!(s in state.detailProcs)) {
+      if (state.detailCharts[s]) state.detailCharts[s].destroy();
+      delete state.detailCharts[s];
+    }
+  }
+  const servers = state.servers.filter(s => s in state.detailProcs);
+  if (servers.length === 0) {
+    grid.style.display = "none";
+    grid.innerHTML = "";
+    return;
+  }
+  grid.style.display = "";
+  for (const s of servers) {
+    const proc = state.detailProcs[s];
+    let card = grid.querySelector(`[data-detail="${esc(s)}"]`);
+    if (!card) {
+      card = document.createElement("div");
+      card.className = "card chartcard";
+      card.dataset.detail = s;
+      card.innerHTML = `<div class="charthead"><h2 class="dtitle"></h2><button class="dclose" title="Close">✕</button></div><div class="chartwrap"><canvas></canvas></div>`;
+      card.querySelector(".dclose").addEventListener("click", () => {
+        delete state.detailProcs[s];
+        renderDetailCharts();
+      });
+      grid.appendChild(card);
+    }
+    card.querySelector(".dtitle").textContent = proc + " · " + s;
+    card.style.display = state.visible[s] === false ? "none" : "";
+    let ch = state.detailCharts[s];
+    if (!ch) {
+      const canvas = card.querySelector("canvas");
+      const old = Chart.getChart(canvas);
+      if (old) old.destroy();
+      ch = new Chart(canvas, {
+        type: "line",
+        data: { labels: [], datasets: [
+          { label: "in", data: [], borderColor: COLORS.rx, backgroundColor: "rgba(34,211,238,.12)", fill: true, tension: .3, pointRadius: 0, borderWidth: 2 },
+          { label: "out", data: [], borderColor: COLORS.tx, backgroundColor: "rgba(245,158,11,.12)", fill: true, tension: .3, pointRadius: 0, borderWidth: 2 }
+        ]},
+        options: { scales: { y: { min: 0 } }, animation: false, responsive: true }
+      });
+      state.detailCharts[s] = ch;
+    }
+    // History laden, wenn die Auswahl gewechselt hat
+    if (ch._loaded !== proc) fetchDetailHistory(s, proc);
+  }
+}
+
+function fetchDetailHistory(server, proc) {
+  const ch = state.detailCharts[server];
+  if (!ch) return;
+  ch._loaded = proc;
+  fetch(`/api/process_history?server=${encodeURIComponent(server)}&proc=${encodeURIComponent(proc)}`)
+    .then(r => r.json())
+    .then(d => {
+      ch.data.labels = (d.ts || []).map(fmtTs);
+      ch.data.datasets[0].data = d.rx || [];
+      ch.data.datasets[1].data = d.tx || [];
+      ch.update("none");
+    })
+    .catch(() => {});
+}
+
+document.getElementById("proctbody").addEventListener("click", e => {
+  const tr = e.target.closest("tr[data-proc]");
+  if (!tr) return;
+  const server = tr.dataset.server, proc = tr.dataset.proc;
+  if (state.detailProcs[server] === proc) delete state.detailProcs[server];
+  else state.detailProcs[server] = proc;
+  renderDetailCharts();
+});
+
 /* ---------- Statusleiste + Karten ---------- */
 function renderStatusbar(servers) {
   const ver = document.getElementById("ver");
@@ -187,7 +265,32 @@ function applyVisibility() {
     const card = document.getElementById("chart-" + name.replace(/[^a-zA-Z0-9]/g, "_"));
     if (card) card.style.display = state.visible[name] ? "" : "none";
   }
-  if (state.lastTable) renderTable(state.lastTable, state.servers.map(n => ({ name: n })));
+  renderTable(state.lastTable || [], state.servers.map(n => ({ name: n })));
+  renderDetailCharts();
+}
+
+/* Live-Werte an die Detail-Grafiken haengen (aus dem aktuellen Dashboard-Poll) */
+function updateDetailCharts(d) {
+  for (const s of Object.keys(state.detailProcs)) {
+    const ch = state.detailCharts[s];
+    if (!ch) continue;
+    const proc = state.detailProcs[s];
+    let rx = 0, tx = 0;
+    for (const row of d.table || []) {
+      const h = row.hosts && row.hosts[s];
+      if (row.name === proc && h) { rx = h.rx ?? 0; tx = h.tx ?? 0; break; }
+    }
+    const max = 300;
+    ch.data.labels.push(fmtTs(d.ts || (Date.now() / 1000)));
+    ch.data.datasets[0].data.push(rx);
+    ch.data.datasets[1].data.push(tx);
+    if (ch.data.labels.length > max) {
+      ch.data.labels.shift();
+      ch.data.datasets[0].data.shift();
+      ch.data.datasets[1].data.shift();
+    }
+    ch.update("none");
+  }
 }
 
 /* ---------- Process table: one row per (process x server) ---------- */
@@ -231,7 +334,7 @@ function renderTable(table, servers) {
     if (r.kind === "container") badge = `<span class="cont">Container</span>`;
     else if (r.container) badge = `<span class="cont">${esc(r.container)}</span>`;
     const h = r.hosts[sname] || {};
-    return `<tr${isRest ? ' class="restrow"' : ""}>` +
+    return `<tr${isRest ? ' class="restrow"' : ""} data-server="${esc(sname)}" data-proc="${esc(r.name)}">` +
       `<td class="pname${isRest ? " rest" : ""}">${esc(r.name)}${badge}</td>` +
       `<td class="srv">${esc(sname)}</td>` +
       `<td class="num rx">${h.rx == null ? "–" : fmt(h.rx)}</td>` +
@@ -314,6 +417,7 @@ async function refresh() {
   renderStatusbar(d.servers);
   updateCharts(d.series);
   renderTable(d.table, d.servers);
+  updateDetailCharts(d);
   renderIfaces(d.ifaces, d.servers);
 }
 
