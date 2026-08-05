@@ -63,6 +63,7 @@ class Monitor:
         self.token = token
         self.lock = threading.Lock()
         self.history: dict = {}
+        self.proc_history: dict = {}   # server -> {proc_name -> deque[(ts,rx,tx)]}
         self.snaps: dict = {}
         self.online: dict = {}
         self.errors: dict = {}
@@ -71,6 +72,7 @@ class Monitor:
         for s in servers:
             name = s["name"]
             self.history[name] = deque(maxlen=3600)  # 1 h bei 1 s
+            self.proc_history[name] = {}
             self.snaps[name] = None
             self.online[name] = False
             self.errors[name] = ""
@@ -105,6 +107,12 @@ class Monitor:
                             self.history[name].append(
                                 (snap["ts"], snap["totals"]["rx"], snap["totals"]["tx"])
                             )
+                            # Per-Prozess-History (5 min Ring-Buffer pro Prozess)
+                            ph = self.proc_history[name]
+                            for p in snap.get("processes", []):
+                                ph.setdefault(p["name"], deque(maxlen=300)).append(
+                                    (snap["ts"], p["rx"], p["tx"])
+                                )
                         else:
                             self.online[name] = False
                             self.errors[name] = err or ""
@@ -182,6 +190,19 @@ class Monitor:
                 "ts": time.time(),
             }
 
+    def process_history(self, server: str, proc: str) -> dict:
+        """History eines Prozesses: {ts, rx, tx} (letzte 300 Punkte)."""
+        with self.lock:
+            ph = self.proc_history.get(server, {}).get(proc)
+            if not ph:
+                return {"ts": [], "rx": [], "tx": []}
+            items = list(ph)
+            return {
+                "ts": [p[0] for p in items],
+                "rx": [p[1] for p in items],
+                "tx": [p[2] for p in items],
+            }
+
 
 class WebHandler(BaseHTTPRequestHandler):
     server_version = "NetMonWeb/1.0"
@@ -195,9 +216,18 @@ class WebHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):  # noqa: N802
-        path = self.path.split("?")[0]
+        raw_path = self.path
+        path = raw_path.split("?")[0]
         if path == "/api/dashboard":
             body = json.dumps(self.server.monitor.dashboard()).encode()
+            self._send_bytes(200, body, "application/json")
+            return
+        if path == "/api/process_history":
+            from urllib.parse import parse_qs, unquote
+            q = parse_qs(raw_path.split("?", 1)[1]) if "?" in raw_path else {}
+            server = unquote((q.get("server") or [""])[0])
+            proc = unquote((q.get("proc") or [""])[0])
+            body = json.dumps(self.server.monitor.process_history(server, proc)).encode()
             self._send_bytes(200, body, "application/json")
             return
         if path in ("/", "/index.html"):
