@@ -1,0 +1,14 @@
+<CommunityApplications>
+  <Profile>
+NetSpy is a live network monitoring dashboard for Unraid and other servers:
+per-interface, per-process and per-container throughput in real time (1 s
+sampling). One Docker image, two roles — the web dashboard polls lightweight
+agents on other hosts (TrueNAS, Debian, ...) via a single compose file or the
+Unraid GUI template.
+
+Support: open an issue at https://github.com/thefirstmojo/netspy/issues
+  </Profile>
+  <Icon>https://raw.githubusercontent.com/thefirstmojo/netspy/main/templates/icon.png</Icon>
+  <WebPage>https://github.com/thefirstmojo/netspy</WebPage>
+  <Photo>https://raw.githubusercontent.com/thefirstmojo/netspy/main/docs/screenshot.png</Photo>
+</CommunityApplications>
