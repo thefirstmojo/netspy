@@ -99,8 +99,16 @@ td.srv { color: var(--muted); }
 .ifacetable th:first-child, .ifacetable td:first-child { width: 55%; }
 .ifacetable th.num, .ifacetable td.num { width: 22.5%; }
 
-/* Server-Filter (Checkbox-Chips) */
-.serverfilter { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+/* Server-Filter (Checkbox-Chips) + Equal-Scale-Button */
+.filterrow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
+.serverfilter { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 0; }
+.scalebtn {
+  background: var(--card); border: 1px solid var(--border); color: var(--muted);
+  border-radius: 999px; padding: 5px 14px; font-size: 13px; cursor: pointer;
+  font-family: inherit; white-space: nowrap;
+}
+.scalebtn:hover { border-color: var(--rx); color: var(--text); }
+.scalebtn.active { background: rgba(34,211,238,.12); border-color: var(--rx); color: var(--rx); }
 .chip {
   display: inline-flex; align-items: center; gap: 7px;
   background: var(--card); border: 1px solid var(--border);

@@ -4,6 +4,7 @@
 const state = {
   sortKey: "rx", sortDir: -1, servers: [], charts: {},
   ifaceSort: {}, lastIfaces: null, lastTable: [], visible: {},
+  equalScale: false, lastSeries: null,
 };
 
 const COLORS = { rx: "#22d3ee", tx: "#f59e0b" };
@@ -74,17 +75,43 @@ function buildCharts(servers) {
 }
 
 function updateCharts(series) {
+  const n = 300;
+  let ymax = 0;
+  if (state.equalScale) {
+    // Globales Maximum ueber ALLE Server -> gleiche Y-Skala fuer Vergleich
+    for (const name of state.servers) {
+      const s = series[name];
+      if (!s) continue;
+      const cnt = Math.min(n, s.rx.length);
+      for (let i = 0; i < cnt; i++) {
+        const v = Math.max(s.rx[i] || 0, s.tx[i] || 0);
+        if (v > ymax) ymax = v;
+      }
+    }
+  }
   for (const name of state.servers) {
     const ch = state.charts[name];
     if (!ch) continue;
     const s = series[name] || { ts: [], rx: [], tx: [] };
-    const n = Math.min(300, s.ts.length);
     ch.data.labels = s.ts.slice(-n).map(fmtTs);
     ch.data.datasets[0].data = s.rx.slice(-n);
     ch.data.datasets[1].data = s.tx.slice(-n);
+    if (state.equalScale) {
+      ch.options.scales.y.min = 0;
+      ch.options.scales.y.max = ymax > 0 ? ymax * 1.15 : undefined;
+    } else {
+      delete ch.options.scales.y.min;
+      delete ch.options.scales.y.max;
+    }
     ch.update("none");
   }
 }
+
+document.getElementById("scalebtn").addEventListener("click", () => {
+  state.equalScale = !state.equalScale;
+  document.getElementById("scalebtn").classList.toggle("active", state.equalScale);
+  if (state.lastSeries) updateCharts(state.lastSeries);
+});
 
 /* ---------- Statusleiste + Karten ---------- */
 function renderStatusbar(servers) {
@@ -283,6 +310,7 @@ async function refresh() {
   state.version = d.version || state.version;
   state.lastIfaces = d.ifaces;
   state.lastTable = d.table;
+  state.lastSeries = d.series;
   renderStatusbar(d.servers);
   updateCharts(d.series);
   renderTable(d.table, d.servers);
