@@ -112,6 +112,7 @@ document.getElementById("scalebtn").addEventListener("click", () => {
   state.equalScale = !state.equalScale;
   document.getElementById("scalebtn").classList.toggle("active", state.equalScale);
   if (state.lastSeries) updateCharts(state.lastSeries);
+  applyDetailScale();
 });
 
 /* ---------- Prozess-Detail-Grafik (Klick auf Tabellen-Zeile) ---------- */
@@ -301,6 +302,30 @@ function updateDetailCharts(d) {
       ch.data.labels.shift();
       ch.data.datasets[0].data.shift();
       ch.data.datasets[1].data.shift();
+    }
+  }
+  applyDetailScale();
+}
+
+/* Gleiche Y-Skala fuer ALLE Detail-Grafiken (wenn Equal scale aktiv) */
+function applyDetailScale() {
+  let ymax = 0;
+  for (const s of Object.keys(state.detailCharts)) {
+    const ch = state.detailCharts[s];
+    if (!ch) continue;
+    for (const ds of ch.data.datasets) {
+      for (const v of ds.data) if (v > ymax) ymax = v;
+    }
+  }
+  for (const s of Object.keys(state.detailCharts)) {
+    const ch = state.detailCharts[s];
+    if (!ch) continue;
+    if (state.equalScale) {
+      ch.options.scales.y.min = 0;
+      ch.options.scales.y.max = ymax > 0 ? ymax * 1.15 : undefined;
+    } else {
+      delete ch.options.scales.y.min;
+      delete ch.options.scales.y.max;
     }
     ch.update("none");
   }
