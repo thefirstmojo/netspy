@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<!-- NetSpy — Live network monitoring (web role).
+     Docs: https://github.com/thefirstmojo/netspy
+     One image, two roles: web (dashboard, this template) or agent (collector).
+     Agent deployments on TrueNAS/Debian use the docker-compose.yml from the repo. -->
+<Container version="2">
+  <Name>NetSpy</Name>
+  <Description>Live network monitoring: per-interface, per-process and per-container throughput with 1s sampling.</Description>
+  <Overview>Web dashboard showing real-time network throughput of Unraid (and other hosts): interface rates, per-process breakdown, per-container traffic. One image, two roles — this template installs the web role; add agents on other hosts (TrueNAS/Debian) via the repo's docker-compose.yml.</Overview>
+  <Category>Network:Tools:</Category>
+  <Repository>ghcr.io/thefirstmojo/netspy:latest</Repository>
+  <Registry>https://github.com/users/thefirstmojo/packages/container/package/netspy</Registry>
+  <Support>https://github.com/thefirstmojo/netspy/issues</Support>
+  <Project>https://github.com/thefirstmojo/netspy</Project>
+  <TemplateURL>https://raw.githubusercontent.com/thefirstmojo/netspy/main/templates/netspy.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/thefirstmojo/netspy/main/templates/icon.png</Icon>
+  <WebUI>http://[IP]:[PORT:8090]</WebUI>
+  <Privileged>false</Privileged>
+  <Networking>
+    <Mode>host</Mode>
+  </Networking>
+  <!-- host networking + host PID namespace are required: the sampler reads /proc and ss of the real host.
+       SYS_PTRACE: attribute sockets of non-root processes. AppArmor is not enforced on Unraid. -->
+  <ExtraParams>--pid=host --cap-drop=ALL --cap-add=SYS_PTRACE</ExtraParams>
+  <Config Name="ROLE" Target="ROLE" Default="web" Mode="rw" Description="Role: web = dashboard + local sampler (this host); agent = collector for another web instance." Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="SERVERS" Target="SERVERS" Default="Unraid=local" Mode="rw" Description="Servers the dashboard polls, semicolon-separated: Name=local;Name=http://host:8091. 'local' samples this host directly; http://... polls an agent on another host." Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="UPLINK" Target="UPLINK" Default="" Mode="rw" Description="Optional override of the uplink interfaces (comma-separated, e.g. br0,bond0). Empty = auto-detect via default route (br0 on Unraid)." Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="PORT:8090" Target="WEB_PORT" Default="8090" Mode="rw" Description="Host port of the web UI. Host networking: the value IS the host port." Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="PORT:8091" Target="AGENT_PORT" Default="8091" Mode="rw" Description="Host port of the agent API (used by other hosts' dashboards to poll this one). Host networking: the value IS the host port." Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="AGENT_TOKEN" Target="AGENT_TOKEN" Default="" Mode="rw" Description="Shared token for agent API access — must be identical on the web instance and every agent (set a long random value)." Type="Variable" Display="always" Required="true" Mask="true"/>
+  <Config Name="DOCKER_SOCK" Target="DOCKER_SOCK" Default="/var/run/docker.sock" Mode="rw" Description="Docker socket path for per-container rows. Keep the 'Docker Socket' path mapping below active; set to empty to disable." Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="Docker Socket" Target="/var/run/docker.sock" Default="/var/run/docker.sock" Mode="ro" Description="Mount the Docker socket (read-only) so container names appear in the process list (per-container throughput)." Type="Path" Display="always"/>
+</Container>

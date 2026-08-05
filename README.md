@@ -96,6 +96,15 @@ docker compose up -d
   traffic appears as a per-container row instead. Kernel-level SMB/NFS mounts
   (cifs client) are likewise kernel-driven and land in the "not assigned" row.
 
+## Unraid (Community Applications)
+
+A CA template lives in [`templates/`](templates/netspy.xml): it installs the
+web role with all settings editable in the Unraid Docker GUI (ROLE, SERVERS,
+UPLINK, ports, token, Docker socket). To try it: Apps → Settings → Template
+Repositories → add `https://github.com/thefirstmojo/netspy`. No GHCR login
+needed — the image pulls anonymously. See
+[templates/README.md](templates/README.md).
+
 ## Configuration
 
 All values are set **directly in `docker-compose.yml`** (no `.env` file):
