@@ -496,16 +496,24 @@ class Sampler:
         emitted = {}
         for name, ema in self._ema.items():
             last = self._active.get(name, 0.0)
-            if ema["rx"] > 0.0 or ema["tx"] > 0.0 or (mono - last) < DECAY_S:
-                # EMA-Nachlauf an aktuelle Host-Rate klemmen: ein Prozess wird
-                # nie schneller angezeigt als der Host insgesamt empfängt/sendet
-                if link_cap > 0:
-                    emitted[name] = {
-                        "rx": min(ema["rx"], link_cap),
-                        "tx": min(ema["tx"], link_cap),
-                    }
-                else:
-                    emitted[name] = ema
+            # Laenger als DECAY_S ohne neue Messwerte: Zeile entfernen.
+            # (Ohne diese Grenze bliebe die letzte Rate fuer immer stehen,
+            # weil die EMA ohne neue Daten nie aktualisiert wird.)
+            if (mono - last) >= DECAY_S:
+                continue
+            # Keine Messung in diesem Tick: Rate klingt exponentiell Richtung 0
+            # ab (faellt sichtbar, statt mit der letzten Rate stehen zu bleiben).
+            if name not in raw:
+                ema = {"rx": ema["rx"] * (1 - EMA), "tx": ema["tx"] * (1 - EMA)}
+            # EMA-Nachlauf an aktuelle Host-Rate klemmen: ein Prozess wird
+            # nie schneller angezeigt als der Host insgesamt empfängt/sendet
+            if link_cap > 0:
+                emitted[name] = {
+                    "rx": min(ema["rx"], link_cap),
+                    "tx": min(ema["tx"], link_cap),
+                }
+            else:
+                emitted[name] = ema
         self._ema = {k: v for k, v in self._ema.items() if k in emitted}
         self._active = {k: v for k, v in self._active.items() if k in emitted}
         # Zuordnungs-Cache an lebende Zeilen klemmen (neu geprueft beim Wiederauftauchen)
