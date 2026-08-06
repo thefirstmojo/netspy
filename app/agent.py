@@ -162,6 +162,8 @@ class Sampler:
         self._containers: dict = {}       # netns-inode -> container-name
         self._mac_containers: dict = {}   # mac -> container-name
         self._veth_containers: dict = {}  # veth-iface -> container-name
+        self._port_containers: dict = {}  # host-port -> container-name (docker-proxy)
+        self._proxy_port: dict = {}       # pid -> host-port (docker-proxy cmdline)
         self._fdb_size = 0                # Anzahl gelesener FDB-Einträge
         self._ns_ts = 0.0
         self._last_mono = 0.0
@@ -192,6 +194,25 @@ class Sampler:
             except OSError:
                 self._ns[pid] = 0
         return self._ns[pid]
+
+    def proxy_port_of(self, pid: int) -> int:
+        """docker-proxy: Host-Port aus der cmdline (-host-port N).
+
+        Damit laesst sich der Proxy exakt dem Container mit diesem
+        Port-Mapping zuordnen (statt des Host-IP-Fallbacks)."""
+        if pid not in self._proxy_port:
+            port = 0
+            try:
+                with open(f"{PROC}/{pid}/cmdline", "rb") as f:
+                    args = f.read().decode("utf-8", "replace").split("\0")
+                for i, a in enumerate(args):
+                    if a == "-host-port" and i + 1 < len(args):
+                        port = int(args[i + 1])
+                        break
+            except (OSError, ValueError):
+                port = 0
+            self._proxy_port[pid] = port
+        return self._proxy_port[pid]
 
     def _default_route_ifaces(self) -> set:
         """Interfaces mit IPv4-Default-Route (30 s gecacht)."""
@@ -289,6 +310,7 @@ class Sampler:
             self._containers = {}
             self._mac_containers = {}
             self._veth_containers = {}
+            self._port_containers = {}
             return
         if time.time() - self._ns_ts < 15:
             return
@@ -297,9 +319,15 @@ class Sampler:
             containers = self._docker_get("/containers/json") or []
             ns_map = {}
             mac_map = {}
+            port_map = {}
             for c in containers:
                 cid = c.get("Id", "")
                 name = (c.get("Names") or ["?"])[0].lstrip("/")
+                # Host-Port -> Container (fuer docker-proxy-Zuordnung)
+                for p in c.get("Ports") or []:
+                    pub = p.get("PublicPort")
+                    if pub:
+                        port_map.setdefault(pub, name)
                 info = self._docker_get(f"/containers/{cid}/json") if cid else None
                 if not info:
                     continue
@@ -319,6 +347,8 @@ class Sampler:
                 self._containers = ns_map
             if mac_map:
                 self._mac_containers = mac_map
+            if port_map:
+                self._port_containers = port_map
             # veth -> Container über FDB (MAC ist auf dem Bridge-Port gelernt)
             fdb = self._run_fdb()
             self._fdb_size = len(fdb)
@@ -422,6 +452,15 @@ class Sampler:
                     continue
                 pid = s["pid"]
                 name = self.comm_for(pid)
+                # docker-proxy: exakte Zuordnung ueber den gemappten Host-Port.
+                # Jeder Port bekommt eine eigene Zeile (docker-proxy:<port>) mit
+                # dem echten Container statt des Host-IP-Fallbacks (host networking).
+                if name == "docker-proxy":
+                    port = self.proxy_port_of(pid)
+                    cname = self._port_containers.get(port) if port else None
+                    if cname:
+                        name = f"docker-proxy:{port}"
+                        proc_cont[name] = cname
                 e = raw.setdefault(name, [0.0, 0.0])
                 e[0] += drx
                 e[1] += dtx
@@ -436,6 +475,7 @@ class Sampler:
             alive = set(s["pid"] for s in ss.values())
             self._comm = {k: v for k, v in self._comm.items() if k in alive}
             self._ns = {k: v for k, v in self._ns.items() if k in alive}
+            self._proxy_port = {k: v for k, v in self._proxy_port.items() if k in alive}
 
         # --- EMA-Glättung + Aktivitäts-Decay für Prozesse ---
         for name, (r, t) in raw.items():
