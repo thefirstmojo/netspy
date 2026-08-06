@@ -164,6 +164,7 @@ class Sampler:
         self._veth_containers: dict = {}  # veth-iface -> container-name
         self._port_containers: dict = {}  # host-port -> container-name (docker-proxy)
         self._proxy_port: dict = {}       # pid -> host-port (docker-proxy cmdline)
+        self._proc_cont: dict = {}        # name -> container (persistent, kein Flackern)
         self._fdb_size = 0                # Anzahl gelesener FDB-Einträge
         self._ns_ts = 0.0
         self._last_mono = 0.0
@@ -432,7 +433,9 @@ class Sampler:
         # sein als die Gesamt-Uplink-Rate des Hosts in derselben Sekunde.
         link_cap = totals["rx"] + totals["tx"]
         raw: dict = {}
-        proc_cont: dict = {}
+        # Persistente Zuordnungen uebernehmen: ein einmal zugeordneter
+        # docker-proxy behaelt sein Badge, auch wenn der Socket kurz pausiert.
+        proc_cont: dict = dict(self._proc_cont)
         if ss is not None:
             for ino, s in ss.items():
                 prev = self._prev_ss.get(ino)
@@ -460,6 +463,7 @@ class Sampler:
                     cname = self._port_containers.get(port) if port else None
                     if cname:
                         name = f"docker-proxy:{port}"
+                        self._proc_cont[name] = cname
                         proc_cont[name] = cname
                 e = raw.setdefault(name, [0.0, 0.0])
                 e[0] += drx
@@ -504,6 +508,8 @@ class Sampler:
                     emitted[name] = ema
         self._ema = {k: v for k, v in self._ema.items() if k in emitted}
         self._active = {k: v for k, v in self._active.items() if k in emitted}
+        # Zuordnungs-Cache an lebende Zeilen klemmen (neu geprueft beim Wiederauftauchen)
+        self._proc_cont = {k: v for k, v in self._proc_cont.items() if k in emitted}
 
         procs_list = [
             {"name": n, "rx": round(v["rx"], 1), "tx": round(v["tx"], 1),
