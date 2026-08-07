@@ -29,6 +29,39 @@ function esc(s) {
 }
 
 /* ---------- Charts aufbauen (einmalig pro Server) ---------- */
+
+/* Tooltip-Zusatz: Top-Prozesse des Servers mit ihren aktuellen Raten */
+function tooltipProcs(items, serverName) {
+  const rows = (state.lastTable || []).filter(r =>
+    r.hosts && r.hosts[serverName] &&
+    ((r.hosts[serverName].rx || 0) > 0 || (r.hosts[serverName].tx || 0) > 0));
+  if (!rows.length) return [];
+  const top = rows
+    .sort((a, b) => (b.hosts[serverName].rx + b.hosts[serverName].tx) -
+                    (a.hosts[serverName].rx + a.hosts[serverName].tx))
+    .slice(0, 5);
+  return ["", "— Top Prozesse —",
+    ...top.map(r => {
+      const h = r.hosts[serverName];
+      return ` ${r.name.length > 26 ? r.name.slice(0, 26) + "…" : r.name}: ▼ ${fmt(h.rx)} ▲ ${fmt(h.tx)}`;
+    })];
+}
+
+/* Chart-Update, das einen offenen Tooltip einfriert: Der Tooltip bleibt an
+ * seiner Position, waehrend die Daten dahinter weiterscrollen — er folgt
+ * erst wieder der Maus, wenn sie sich bewegt. */
+function updateChartFrozen(ch) {
+  const t = ch.tooltip;
+  const active = t && t.getActiveElements().length ? t.getActiveElements() : null;
+  const pos = active && t.caretX != null ? { x: t.caretX, y: t.caretY } : null;
+  ch.update("none");
+  if (active && pos) {
+    t.setActiveElements(active, pos);
+    t.update(ch);
+    ch.draw();
+  }
+}
+
 function buildCharts(servers) {
   const grid = document.getElementById("chartgrid");
   grid.innerHTML = "";
@@ -64,7 +97,14 @@ function buildCharts(servers) {
         animation: false,
         responsive: true,
         maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              afterBody: items => tooltipProcs(items, s.name),
+            },
+          },
+        },
         scales: {
           x: { ticks: { color: "#64748b", maxTicksLimit: 6, maxRotation: 0 }, grid: { color: "rgba(255,255,255,.05)" } },
           y: { ticks: { color: "#64748b", callback: v => fmt(v) }, grid: { color: "rgba(255,255,255,.05)" }, beginAtZero: true },
@@ -104,7 +144,7 @@ function updateCharts(series) {
       delete ch.options.scales.y.min;
       delete ch.options.scales.y.max;
     }
-    ch.update("none");
+    updateChartFrozen(ch);
   }
 }
 
@@ -327,7 +367,7 @@ function applyDetailScale() {
       delete ch.options.scales.y.min;
       delete ch.options.scales.y.max;
     }
-    ch.update("none");
+    updateChartFrozen(ch);
   }
 }
 
