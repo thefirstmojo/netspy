@@ -64,6 +64,7 @@ class Monitor:
         self.lock = threading.Lock()
         self.history: dict = {}
         self.proc_history: dict = {}   # server -> {proc_name -> deque[(ts,rx,tx)]}
+        self.proc_snaps: dict = {}     # server -> deque[(ts, [[name,cont,rx,tx],...])]
         self.snaps: dict = {}
         self.online: dict = {}
         self.errors: dict = {}
@@ -73,6 +74,7 @@ class Monitor:
             name = s["name"]
             self.history[name] = deque(maxlen=3600)  # 1 h bei 1 s
             self.proc_history[name] = {}
+            self.proc_snaps[name] = deque(maxlen=300)  # Zeit-Snapshots fuer Hover-Tooltip
             self.snaps[name] = None
             self.online[name] = False
             self.errors[name] = ""
@@ -113,6 +115,14 @@ class Monitor:
                                 ph.setdefault(p["name"], deque(maxlen=300)).append(
                                     (snap["ts"], p["rx"], p["tx"])
                                 )
+                            # Zeit-Snapshots (alle Prozesse zu einem ts) fuer den
+                            # eingefrorenen Hover-Tooltip
+                            self.proc_snaps[name].append((
+                                snap["ts"],
+                                [(p.get("name", "?"), p.get("container"),
+                                  p.get("rx", 0.0), p.get("tx", 0.0))
+                                 for p in snap.get("processes", [])],
+                            ))
                         else:
                             self.online[name] = False
                             self.errors[name] = err or ""
@@ -203,6 +213,21 @@ class Monitor:
                 "tx": [p[2] for p in items],
             }
 
+    def prochistory(self) -> dict:
+        """Zeit-Snapshots aller Prozesse pro Server (letzte 300 Punkte).
+
+        Struktur: {server: [{ts, procs: [[name, container, rx, tx], ...]}, ...]}
+        Fuer den eingefrorenen Hover-Tooltip, synchron zur Totals-History.
+        """
+        with self.lock:
+            return {
+                name: [
+                    {"ts": ts, "procs": procs}
+                    for (ts, procs) in list(self.proc_snaps.get(name, []))[-300:]
+                ]
+                for name in self.proc_snaps
+            }
+
 
 class WebHandler(BaseHTTPRequestHandler):
     server_version = "NetMonWeb/1.0"
@@ -220,6 +245,10 @@ class WebHandler(BaseHTTPRequestHandler):
         path = raw_path.split("?")[0]
         if path == "/api/dashboard":
             body = json.dumps(self.server.monitor.dashboard()).encode()
+            self._send_bytes(200, body, "application/json")
+            return
+        if path == "/api/prochistory":
+            body = json.dumps(self.server.monitor.prochistory()).encode()
             self._send_bytes(200, body, "application/json")
             return
         if path == "/api/process_history":
