@@ -6,6 +6,8 @@ const state = {
   ifaceSort: {}, lastIfaces: null, lastTable: [], visible: {},
   equalScale: false, lastSeries: null,
   detailProcs: {}, detailCharts: {},   // server -> {proc, chart}
+  procHistory: {},                     // server -> [{ts, procs:[[name,cont,rx,tx],...]}]
+  tipEl: null,
 };
 
 const COLORS = { rx: "#22d3ee", tx: "#f59e0b" };
@@ -30,36 +32,88 @@ function esc(s) {
 
 /* ---------- Charts aufbauen (einmalig pro Server) ---------- */
 
-/* Tooltip-Zusatz: Top-Prozesse des Servers mit ihren aktuellen Raten */
-function tooltipProcs(items, serverName) {
-  const rows = (state.lastTable || []).filter(r =>
-    r.hosts && r.hosts[serverName] &&
-    ((r.hosts[serverName].rx || 0) > 0 || (r.hosts[serverName].tx || 0) > 0));
-  if (!rows.length) return [];
-  const top = rows
-    .sort((a, b) => (b.hosts[serverName].rx + b.hosts[serverName].tx) -
-                    (a.hosts[serverName].rx + a.hosts[serverName].tx))
-    .slice(0, 5);
-  return ["", "— Top Prozesse —",
-    ...top.map(r => {
-      const h = r.hosts[serverName];
-      return ` ${r.name.length > 26 ? r.name.slice(0, 26) + "…" : r.name}: ▼ ${fmt(h.rx)} ▲ ${fmt(h.tx)}`;
-    })];
+/* Eingefrorener HTML-Tooltip: wird NUR bei Mausbewegung aktualisiert und
+ * zeigt exakt die Daten (in/out + Prozesse) des Hover-Zeitpunkts. Scrollt
+ * der Chart weiter, bleibt er unveraendert stehen und folgt erst wieder
+ * der Maus, wenn sie sich bewegt. */
+let frozenTip = null; // {el, server}
+
+function ensureTipEl() {
+  if (state.tipEl) return state.tipEl;
+  const el = document.createElement("div");
+  el.id = "proctip";
+  el.style.cssText =
+    "position:fixed;z-index:9999;pointer-events:none;display:none;" +
+    "background:rgba(15,23,42,.95);border:1px solid rgba(148,163,184,.3);" +
+    "border-radius:8px;padding:8px 10px;font:12px/1.45 ui-monospace,monospace;" +
+    "color:#e2e8f0;box-shadow:0 8px 24px rgba(0,0,0,.45);max-width:420px;white-space:nowrap";
+  document.body.appendChild(el);
+  state.tipEl = el;
+  return el;
 }
 
-/* Chart-Update, das einen offenen Tooltip einfriert: Der Tooltip bleibt an
- * seiner Position, waehrend die Daten dahinter weiterscrollen — er folgt
- * erst wieder der Maus, wenn sie sich bewegt. */
-function updateChartFrozen(ch) {
-  const t = ch.tooltip;
-  const active = t && t.getActiveElements().length ? t.getActiveElements() : null;
-  const pos = active && t.caretX != null ? { x: t.caretX, y: t.caretY } : null;
-  ch.update("none");
-  if (active && pos) {
-    t.setActiveElements(active, pos);
-    t.update(ch);
-    ch.draw();
+function hideTip() {
+  if (state.tipEl) state.tipEl.style.display = "none";
+  frozenTip = null;
+}
+
+function showTip(cx, cy, label, rx, tx, snap) {
+  const el = ensureTipEl();
+  let html =
+    `<div style="color:#94a3b8;margin-bottom:4px">${esc(label)}</div>` +
+    `<div><span style="color:${COLORS.rx}">▼ in ${fmt(rx)}</span>` +
+    `&nbsp;&nbsp;<span style="color:${COLORS.tx}">▲ out ${fmt(tx)}</span></div>`;
+  const procs = (snap && snap.procs || [])
+    .filter(p => p[2] > 0 || p[3] > 0)
+    .sort((a, b) => (b[2] + b[3]) - (a[2] + a[3]))
+    .slice(0, 6);
+  if (procs.length) {
+    html += `<div style="border-top:1px solid rgba(148,163,184,.25);margin:6px 0 4px;padding-top:4px;color:#94a3b8">Top Prozesse</div>`;
+    html += procs.map(p => {
+      const nm = p[1]
+        ? `${esc(p[0].length > 24 ? p[0].slice(0, 24) + "…" : p[0])} <span style="color:#22d3ee">[${esc(p[1])}]</span>`
+        : esc(p[0].length > 30 ? p[0].slice(0, 30) + "…" : p[0]);
+      return `<div style="display:flex;justify-content:space-between;gap:16px"><span>${nm}</span>` +
+        `<span style="color:#94a3b8">▼ ${fmt(p[2])} ▲ ${fmt(p[3])}</span></div>`;
+    }).join("");
   }
+  el.innerHTML = html;
+  el.style.display = "block";
+  const w = el.offsetWidth, h = el.offsetHeight;
+  let left = cx + 14, top = cy + 14;
+  if (left + w > window.innerWidth - 8) left = cx - w - 14;
+  if (top + h > window.innerHeight - 8) top = cy - h - 14;
+  el.style.left = left + "px";
+  el.style.top = top + "px";
+}
+
+/* Prozess-Snapshot des Servers zum Zeitpunkt ts (naechstliegender, aelterer Eintrag) */
+function findSnap(serverName, ts) {
+  const arr = state.procHistory[serverName];
+  if (!arr || !arr.length) return null;
+  if (ts == null) return arr[arr.length - 1];
+  let lo = 0, hi = arr.length - 1, best = null;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (arr[mid].ts <= ts) { best = arr[mid]; lo = mid + 1; }
+    else hi = mid - 1;
+  }
+  return best;
+}
+
+/* Datenindex zur Canvas-X-Position (eigenes Hit-Testing, robust gegen
+ * Chart.js-Interaktions-Quirks) */
+function chartIndexAt(ch, x) {
+  const xScale = ch.scales && ch.scales.x;
+  if (!xScale || typeof xScale.getPixelForValue !== "function") return null;
+  const labels = ch.data.labels;
+  if (!labels || !labels.length) return null;
+  let best = null, bestDist = Infinity;
+  for (let i = 0; i < labels.length; i++) {
+    const d = Math.abs(xScale.getPixelForValue(i) - x);
+    if (d < bestDist) { bestDist = d; best = i; }
+  }
+  return bestDist < 1e6 ? best : null;
 }
 
 function buildCharts(servers) {
@@ -84,7 +138,7 @@ function buildCharts(servers) {
 
   for (const s of servers) {
     const canvas = grid.querySelector("#chart-" + s.name.replace(/[^a-zA-Z0-9]/g, "_") + " canvas");
-    state.charts[s.name] = new Chart(canvas, {
+    const ch = new Chart(canvas, {
       type: "line",
       data: {
         labels: [],
@@ -99,11 +153,7 @@ function buildCharts(servers) {
         maintainAspectRatio: false,
         plugins: {
           legend: { display: false },
-          tooltip: {
-            callbacks: {
-              afterBody: items => tooltipProcs(items, s.name),
-            },
-          },
+          tooltip: { enabled: false },   // eigener HTML-Tooltip (eingefroren, Maus-verankert)
         },
         scales: {
           x: { ticks: { color: "#64748b", maxTicksLimit: 6, maxRotation: 0 }, grid: { color: "rgba(255,255,255,.05)" } },
@@ -112,6 +162,27 @@ function buildCharts(servers) {
         interaction: { intersect: false, mode: "index" },
       },
     });
+    state.charts[s.name] = ch;
+    /* Eigener Tooltip: friert bei Hover die Daten ein, verankert an der Maus */
+    canvas.addEventListener("mousemove", e => {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.offsetX !== undefined ? e.offsetX : e.clientX - rect.left;
+      const idx = chartIndexAt(ch, x);
+      if (idx == null) { hideTip(); return; }
+      const ser = state.lastSeries && state.lastSeries[s.name];
+      let ts = null, snap = null;
+      if (ser && ser.ts && ser.ts.length) {
+        const cnt = Math.min(300, ser.ts.length);
+        const seriesIdx = ser.ts.length - cnt + Math.min(idx, cnt - 1);
+        ts = ser.ts[seriesIdx];
+        snap = findSnap(s.name, ts);
+      }
+      frozenTip = { server: s.name };
+      showTip(e.clientX, e.clientY, ts != null ? fmtTs(ts) : "",
+        ch.data.datasets[0].data[idx] || 0,
+        ch.data.datasets[1].data[idx] || 0, snap);
+    });
+    canvas.addEventListener("mouseleave", hideTip);
   }
 }
 
@@ -144,7 +215,7 @@ function updateCharts(series) {
       delete ch.options.scales.y.min;
       delete ch.options.scales.y.max;
     }
-    updateChartFrozen(ch);
+    ch.update("none");
   }
 }
 
@@ -367,7 +438,7 @@ function applyDetailScale() {
       delete ch.options.scales.y.min;
       delete ch.options.scales.y.max;
     }
-    updateChartFrozen(ch);
+    ch.update("none");
   }
 }
 
@@ -492,6 +563,20 @@ async function refresh() {
   state.lastIfaces = d.ifaces;
   state.lastTable = d.table;
   state.lastSeries = d.series;
+  /* Prozess-History pro Server (eingefrorene Hover-Werte, synchron zu den Chart-ts) */
+  for (const srv of d.servers) {
+    const ser = d.series && d.series[srv.name];
+    const tsSnap = ser && ser.ts && ser.ts.length ? ser.ts[ser.ts.length - 1] : null;
+    if (tsSnap == null) continue;
+    const arr = state.procHistory[srv.name] || (state.procHistory[srv.name] = []);
+    if (arr.length && tsSnap <= arr[arr.length - 1].ts) continue; // schon vorhanden
+    const procs = (d.table || [])
+      .filter(r => r.hosts && r.hosts[srv.name] &&
+        ((r.hosts[srv.name].rx || 0) > 0 || (r.hosts[srv.name].tx || 0) > 0))
+      .map(r => [r.name, r.container || null, r.hosts[srv.name].rx || 0, r.hosts[srv.name].tx || 0]);
+    arr.push({ ts: tsSnap, procs });
+    if (arr.length > 420) arr.splice(0, arr.length - 420); // ~7 min Puffer
+  }
   renderStatusbar(d.servers);
   updateCharts(d.series);
   renderTable(d.table, d.servers);
@@ -509,5 +594,17 @@ document.getElementById("procthead").addEventListener("click", e => {
   if (state.lastTable) renderTable(state.lastTable, state.servers.map(n => ({ name: n })));
 });
 
+/* Prozess-History einmalig vom Server laden (deckt die vollen 300 s ab,
+ * damit der Hover-Tooltip auch fuer aeltere Punkte Snapshots hat) */
+async function loadProchistory() {
+  try {
+    const ph = await (await fetch("/api/prochistory")).json();
+    for (const [server, snaps] of Object.entries(ph || {})) {
+      if (snaps && snaps.length) state.procHistory[server] = snaps;
+    }
+  } catch (e) { /* Dashboard-Polls fangen das ab */ }
+}
+
 refresh();
+loadProchistory();
 setInterval(refresh, 1000);
