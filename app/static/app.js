@@ -277,7 +277,7 @@ function renderDetailCharts() {
           animation: false,
           responsive: true,
           maintainAspectRatio: false,
-          plugins: { legend: { display: false } },
+          plugins: { legend: { display: false }, tooltip: { enabled: false } },
           scales: {
             x: { ticks: { color: "#64748b", maxTicksLimit: 6, maxRotation: 0 }, grid: { color: "rgba(255,255,255,.05)" } },
             y: { min: 0, ticks: { color: "#64748b", callback: v => fmt(v) }, grid: { color: "rgba(255,255,255,.05)" }, beginAtZero: true },
@@ -286,6 +286,17 @@ function renderDetailCharts() {
         }
       });
       state.detailCharts[s] = ch;
+      /* Eigener Tooltip (wie Haupt-Charts): friert ein, Maus-verankert, nur in/out */
+      canvas.addEventListener("mousemove", e => {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.offsetX !== undefined ? e.offsetX : e.clientX - rect.left;
+        const idx = chartIndexAt(ch, x);
+        if (idx == null) { hideTip(); return; }
+        showTip(e.clientX, e.clientY, ch.data.labels[idx] || "",
+          ch.data.datasets[0].data[idx] || 0,
+          ch.data.datasets[1].data[idx] || 0, null);
+      });
+      canvas.addEventListener("mouseleave", hideTip);
     }
     // History laden, wenn die Auswahl gewechselt hat
     if (ch._loaded !== proc) fetchDetailHistory(s, proc);
