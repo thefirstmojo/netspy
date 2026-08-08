@@ -99,7 +99,18 @@ def parse_ss(output: str) -> dict:
                 cur = None
                 continue
             cur = int(ino_m.group(1))
-            res.setdefault(cur, {"pid": int(m.group(3)), "rx": 0, "tx": 0})
+            # Lokalen Port extrahieren (4. Feld, z. B. "192.168.2.101:6379"
+            # oder "[::1]:6379"): noetig, um beim docker-proxy die eingehende
+            # Seite (lokaler Port == host-port) von der ausgehenden
+            # Weiterleitung an den Container zu unterscheiden.
+            lport = 0
+            try:
+                parts = line.split()
+                if len(parts) >= 4:
+                    lport = int(parts[3].rsplit(":", 1)[-1].rstrip("]"))
+            except ValueError:
+                lport = 0
+            res.setdefault(cur, {"pid": int(m.group(3)), "rx": 0, "tx": 0, "lport": lport})
             continue
         if cur is None:
             continue
@@ -451,6 +462,14 @@ class Sampler:
                 if link_cap > 0:
                     drx = min(drx, link_cap)
                     dtx = min(dtx, link_cap)
+                # Pro-Socket-Klemme auf die Einzelrichtung: ein Prozess kann nie
+                # mehr empfangen als der Host insgesamt empfängt (bzw. senden
+                # als der Host sendet). Faengt Zaehler-Spruenge bei rotierenden
+                # Verbindungen (z. B. docker-proxy-Verbindungspools).
+                if totals["rx"] > 0:
+                    drx = min(drx, totals["rx"])
+                if totals["tx"] > 0:
+                    dtx = min(dtx, totals["tx"])
                 if drx <= 0 and dtx <= 0:
                     continue
                 pid = s["pid"]
@@ -465,6 +484,12 @@ class Sampler:
                         name = f"docker-proxy:{port}"
                         self._proc_cont[name] = cname
                         proc_cont[name] = cname
+                    # Doppelzaehlung vermeiden: Der docker-proxy hat pro Verbindung
+                    # ZWEI Sockets (eingehend am host-port + ausgehende Weiterleitung
+                    # an die Container-IP). Beide tragen dieselben Bytes — nur die
+                    # eingehende Seite (lokaler Port == host-port) zaehlen.
+                    if port and s.get("lport") and s["lport"] != port:
+                        continue
                 e = raw.setdefault(name, [0.0, 0.0])
                 e[0] += drx
                 e[1] += dtx
@@ -480,6 +505,23 @@ class Sampler:
             self._comm = {k: v for k, v in self._comm.items() if k in alive}
             self._ns = {k: v for k, v in self._ns.items() if k in alive}
             self._proxy_port = {k: v for k, v in self._proxy_port.items() if k in alive}
+
+        # Artefakt-Schutz: Die Summe aller Prozess-Raten darf die physikalische
+        # Interface-Rate nicht uebersteigen. Falls doch (Socket-Zaehler-Spruenge
+        # bei rotierenden Verbindungen o. a.), proportional klemmen — der
+        # Ueberschuss bleibt dann korrekt im "Rest" (kernel/CIFS) statt einem
+        # Prozess zugeschlagen zu werden.
+        if raw:
+            prx = sum(e[0] for e in raw.values())
+            ptx = sum(e[1] for e in raw.values())
+            if prx > totals["rx"] > 0:
+                sc = totals["rx"] / prx
+                for e in raw.values():
+                    e[0] *= sc
+            if ptx > totals["tx"] > 0:
+                sc = totals["tx"] / ptx
+                for e in raw.values():
+                    e[1] *= sc
 
         # --- EMA-Glättung + Aktivitäts-Decay für Prozesse ---
         for name, (r, t) in raw.items():
