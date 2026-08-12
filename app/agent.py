@@ -425,6 +425,15 @@ class Sampler:
         self._ns_ts = time.time()
         try:
             containers = self._docker_get("/containers/json") or []
+            # Host-NetNS: Container mit host networking teilen die Inode des
+            # Host-Init. Deren Prozesse sind von Host-Prozessen nicht zu
+            # unterscheiden -> NICHT in die ns-Zuordnung aufnehmen (sonst
+            # bekäme jeder Host-Prozess das Badge dieses Containers).
+            host_ns = 0
+            try:
+                host_ns = os.stat(f"{PROC}/1/ns/net").st_ino
+            except OSError:
+                pass
             ns_map = {}
             mac_map = {}
             port_map = {}
@@ -443,7 +452,8 @@ class Sampler:
                 if pid > 0:
                     try:
                         st = os.stat(f"{PROC}/{pid}/ns/net")
-                        ns_map[st.st_ino] = name
+                        if st.st_ino != host_ns:
+                            ns_map[st.st_ino] = name
                     except OSError:
                         pass
                 nets = (info.get("NetworkSettings") or {}).get("Networks") or {}

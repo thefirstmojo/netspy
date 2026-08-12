@@ -153,6 +153,9 @@ docker compose up -d
   their own network namespace and are not visible from the host — their
   traffic appears as a per-container row instead. Kernel-level SMB/NFS mounts
   (cifs client) are likewise kernel-driven and land in the "not assigned" row.
+- **Host-network containers** (e.g. `binhex-*` with host networking) share the
+  host netns — their processes are indistinguishable from host processes and
+  get **no container badge** (deliberate, avoids false attribution).
 
 ## Unraid (Community Applications)
 
