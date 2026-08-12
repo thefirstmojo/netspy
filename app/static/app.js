@@ -4,6 +4,7 @@
 const state = {
   sortKey: "name", sortDir: 1, servers: [], charts: {},
   ifaceSort: {}, lastIfaces: null, lastTable: [], visible: {},
+  diskSortKey: "total", diskSortDir: -1, lastDisk: [],
   equalScale: false, lastSeries: null,
   detailProcs: {}, detailCharts: {},   // server -> {proc, chart}
   procHistory: {},                     // server -> [{ts, procs:[[name,cont,rx,tx],...]}]
@@ -502,6 +503,53 @@ function renderTable(table, servers) {
   }).join("");
 }
 
+/* ---------- Disk-I/O Tabelle: one row per (process x server) ---------- */
+function buildDiskHeader(servers) {
+  const thead = document.getElementById("diskthead");
+  const cls = k => "sortable" +
+    (state.diskSortKey === k ? " active" + (state.diskSortDir < 0 ? " sort-desc" : "") : "");
+  thead.innerHTML = `<tr>` +
+    `<th data-key="name" class="${cls("name")}">Process</th>` +
+    `<th data-key="server" class="${cls("server")}">Server</th>` +
+    `<th data-key="read" class="sortable num ${state.diskSortKey === "read" ? "active" + (state.diskSortDir < 0 ? " sort-desc" : "") : ""}">read</th>` +
+    `<th data-key="write" class="sortable num ${state.diskSortKey === "write" ? "active" + (state.diskSortDir < 0 ? " sort-desc" : "") : ""}">write</th>` +
+    `</tr>`;
+}
+
+function renderDiskTable(table, servers) {
+  const tbody = document.getElementById("disktbody");
+  const rows = [];
+  for (const r of table) {
+    for (const sname of Object.keys(r.hosts || {})) {
+      if (!state.visible[sname]) continue;
+      rows.push({ r, sname });
+    }
+  }
+  rows.sort((a, b) => {
+    let av, bv;
+    const ha = a.r.hosts[a.sname] || {}, hb = b.r.hosts[b.sname] || {};
+    if (state.diskSortKey === "name") { av = a.r.name.toLowerCase(); bv = b.r.name.toLowerCase(); }
+    else if (state.diskSortKey === "server") { av = a.sname.toLowerCase(); bv = b.sname.toLowerCase(); }
+    else if (state.diskSortKey === "read") { av = ha.read || 0; bv = hb.read || 0; }
+    else if (state.diskSortKey === "write") { av = ha.write || 0; bv = hb.write || 0; }
+    else { av = (ha.read || 0) + (ha.write || 0); bv = (hb.read || 0) + (hb.write || 0); }
+    if (av < bv) return -state.diskSortDir;
+    if (av > bv) return state.diskSortDir;
+    return 0;
+  });
+
+  tbody.innerHTML = rows.map(({ r, sname }) => {
+    let badge = "";
+    if (r.container) badge = `<span class="cont">${esc(r.container)}</span>`;
+    const h = r.hosts[sname] || {};
+    return `<tr data-server="${esc(sname)}" data-proc="${esc(r.name)}">` +
+      `<td class="pname">${esc(r.name)}${badge}</td>` +
+      `<td class="srv">${esc(sname)}</td>` +
+      `<td class="num rx">${h.read == null ? "–" : fmt(h.read)}</td>` +
+      `<td class="num tx">${h.write == null ? "–" : fmt(h.write)}</td></tr>`;
+  }).join("");
+}
+
 /* ---------- Interfaces (einklappbar, offen-Status + Sortierung bleiben erhalten) ---------- */
 function renderIfaces(ifaces, servers) {
   const wrap = document.getElementById("ifaces");
@@ -568,11 +616,13 @@ async function refresh() {
       state.servers.some((n, i) => n !== d.servers[i].name)) {
     buildCharts(d.servers);
     buildTableHeader(d.servers);
+    buildDiskHeader(d.servers);
     buildServerFilter(d.servers);
   }
   state.version = d.version || state.version;
   state.lastIfaces = d.ifaces;
   state.lastTable = d.table;
+  state.lastDisk = d.disk || [];
   state.lastSeries = d.series;
   /* Prozess-History pro Server (eingefrorene Hover-Werte, synchron zu den Chart-ts) */
   for (const srv of d.servers) {
@@ -591,6 +641,7 @@ async function refresh() {
   renderStatusbar(d.servers);
   updateCharts(d.series);
   renderTable(d.table, d.servers);
+  renderDiskTable(d.disk || [], d.servers);
   updateDetailCharts(d);
   renderIfaces(d.ifaces, d.servers);
 }
@@ -604,6 +655,39 @@ document.getElementById("procthead").addEventListener("click", e => {
   buildTableHeader(state.servers.map(n => ({ name: n })));
   if (state.lastTable) renderTable(state.lastTable, state.servers.map(n => ({ name: n })));
 });
+
+document.getElementById("diskthead").addEventListener("click", e => {
+  const th = e.target.closest("th[data-key]");
+  if (!th) return;
+  const key = th.dataset.key;
+  if (state.diskSortKey === key) state.diskSortDir *= -1;
+  else { state.diskSortKey = key; state.diskSortDir = key === "name" || key === "server" ? 1 : -1; }
+  buildDiskHeader(state.servers.map(n => ({ name: n })));
+  if (state.lastDisk) renderDiskTable(state.lastDisk, state.servers.map(n => ({ name: n })));
+});
+
+/* Tab-Umschaltung: Netzwerk <-> Disk I/O */
+document.getElementById("tabbtn-net").addEventListener("click", () => setTab("net"));
+document.getElementById("tabbtn-disk").addEventListener("click", () => setTab("disk"));
+
+function setTab(which) {
+  const net = document.getElementById("panel-net");
+  const disk = document.getElementById("panel-disk");
+  const bNet = document.getElementById("tabbtn-net");
+  const bDisk = document.getElementById("tabbtn-disk");
+  const showNet = which === "net";
+  net.classList.toggle("hidden", !showNet);
+  disk.classList.toggle("hidden", showNet);
+  bNet.classList.toggle("active", showNet);
+  bDisk.classList.toggle("active", !showNet);
+  bNet.setAttribute("aria-selected", showNet ? "true" : "false");
+  bDisk.setAttribute("aria-selected", showNet ? "false" : "true");
+  /* Chart-Groessen nach Layout-Wechsel neu berechnen */
+  for (const s of Object.keys(state.charts)) {
+    const ch = state.charts[s];
+    if (ch) setTimeout(() => ch.resize(), 30);
+  }
+}
 
 /* Prozess-History einmalig vom Server laden (deckt die vollen 300 s ab,
  * damit der Hover-Tooltip auch fuer aeltere Punkte Snapshots hat) */

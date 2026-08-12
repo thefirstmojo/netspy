@@ -177,6 +177,26 @@ class Monitor:
                              "total": total, "hosts": v["hosts"]})
             rows.sort(key=lambda r: r["total"], reverse=True)
 
+            # Disk-I/O pro Prozess über alle Server (name x server, read/write)
+            dtable: dict = {}
+            for s in self.servers:
+                name = s["name"]
+                snap = self.snaps.get(name)
+                if not snap:
+                    continue
+                for p in snap.get("disk", []):
+                    row = dtable.setdefault(p["name"], {"hosts": {}})
+                    row["hosts"][name] = {"read": p["read"], "write": p["write"]}
+                    if p.get("container"):
+                        row.setdefault("container", p["container"])
+
+            drows = []
+            for pname, v in dtable.items():
+                total = sum(x["read"] + x["write"] for x in v["hosts"].values())
+                drows.append({"name": pname, "container": v.get("container"),
+                              "total": total, "hosts": v["hosts"]})
+            drows.sort(key=lambda r: r["total"], reverse=True)
+
             return {
                 "version": VERSION,
                 "servers": [
@@ -187,7 +207,7 @@ class Monitor:
                         "hostname": (self.snaps.get(s["name"]) or {}).get("hostname", ""),
                         "version": (self.snaps.get(s["name"]) or {}).get("version", ""),
                         "totals": (self.snaps.get(s["name"]) or {}).get("totals",
-                                                                        {"rx": 0.0, "tx": 0.0}),
+                                                                       {"rx": 0.0, "tx": 0.0}),
                     }
                     for s in self.servers
                 ],
@@ -197,6 +217,7 @@ class Monitor:
                     for s in self.servers
                 },
                 "table": rows,
+                "disk": drows,
                 "ts": time.time(),
             }
 

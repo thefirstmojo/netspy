@@ -144,6 +144,10 @@ docker compose up -d
   containers get their own rows (veth sums → container name, e.g. `stash`).
 - **Unattributed:** UDP, kernel threads (nfsd/kworker), short-lived connections
   → row "- not assigned (kernel/UDP) -".
+- **Disk I/O per process (Disk tab):** `/proc/<pid>/io` (read_bytes/write_bytes,
+  cumulative) yields the real storage-layer bytes per process — including
+  network filesystems like CIFS/NFS, so SMB transfers show up on the reader.
+  Deltas are EMA-smoothed with activity decay, exactly like the network rows.
 - **History:** 1 h ring buffer in the web container's memory (no DB needed).
 - **Note on bridge containers:** processes *inside* a bridge container live in
   their own network namespace and are not visible from the host — their

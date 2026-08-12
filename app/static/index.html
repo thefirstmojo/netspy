@@ -20,24 +20,43 @@
 <main>
   <div class="filterrow">
     <div id="serverfilter" class="serverfilter"></div>
+    <div id="tabs" class="tabs" role="tablist">
+      <button id="tabbtn-net" class="tabbtn active" role="tab" aria-selected="true">🌐 Netzwerk</button>
+      <button id="tabbtn-disk" class="tabbtn" role="tab" aria-selected="false">💾 Disk I/O</button>
+    </div>
     <button id="scalebtn" class="scalebtn" title="Force the same Y-axis scale on all charts (for direct comparison)">⚖ Equal scale</button>
   </div>
 
-  <section id="chartgrid" class="chartgrid"></section>
+  <section id="panel-net" class="tabpanel">
+    <section id="chartgrid" class="chartgrid"></section>
 
-  <section id="procdetail" class="chartgrid"></section>
+    <section id="procdetail" class="chartgrid"></section>
 
-  <details id="procdetails" class="card" open>
-    <summary>Processes by server <span class="hint">(click a column header to sort)</span></summary>
-    <div class="tablewrap">
-      <table id="proctable">
-        <thead id="procthead"></thead>
-        <tbody id="proctbody"></tbody>
-      </table>
-    </div>
-  </details>
+    <details id="procdetails" class="card" open>
+      <summary>Processes by server <span class="hint">(click a column header to sort)</span></summary>
+      <div class="tablewrap">
+        <table id="proctable">
+          <thead id="procthead"></thead>
+          <tbody id="proctbody"></tbody>
+        </table>
+      </div>
+    </details>
 
-  <section id="ifaces" class="ifaces"></section>
+    <section id="ifaces" class="ifaces"></section>
+  </section>
+
+  <section id="panel-disk" class="tabpanel hidden">
+    <details class="card" open>
+      <summary>Disk I/O by process <span class="hint">(read/write per second, click a column header to sort)</span></summary>
+      <div class="tablewrap">
+        <table id="disktable">
+          <thead id="diskthead"></thead>
+          <tbody id="disktbody"></tbody>
+        </table>
+      </div>
+    </details>
+    <p class="hint" style="margin:8px 4px">Wer belastet gerade die Festplatte(n)? read/write sind die tatsächlichen Bytes von/auf die Storage-Schicht (inkl. CIFS/NFS-Mounts) pro Sekunde.</p>
+  </section>
 
   <footer>NetSpy · Sampling 1 s · History 1 h (in memory)</footer>
 </main>

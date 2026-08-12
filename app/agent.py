@@ -187,6 +187,12 @@ class Sampler:
         self._active: dict = {}   # name -> monotonic timestamp
         self._ema_rest: dict | None = None
 
+        # Disk-I/O pro Prozess (/proc/<pid>/io)
+        self._disk_prev: dict = {}   # pid -> (read_bytes, write_bytes) kumulativ
+        self._disk_ema: dict = {}    # name -> {"read": float, "write": float}
+        self._disk_active: dict = {} # name -> monotonic timestamp
+        self._disk_cont: dict = {}   # name -> container (persistent, kein Flackern)
+
     # ------------------------------------------------------------------
     # Hilfen
     # ------------------------------------------------------------------
@@ -267,6 +273,96 @@ class Sampler:
             return sum(1 for e in os.listdir(PROC) if e.isdigit())
         except OSError:
             return 0
+
+    # ------------------------------------------------------------------
+    # Disk-I/O pro Prozess (/proc/<pid>/io)
+    # ------------------------------------------------------------------
+    def _disk_read(self) -> dict:
+        """read_bytes/write_bytes aller Prozesse (kumulativ, 64-bit).
+
+        Die Werte sind die tatsaechlich von der Storage-Schicht gelesenen/
+        geschriebenen Bytes (inkl. Netzwerk-Dateisysteme wie CIFS/NFS) —
+        also genau die Festplatten-Last pro Prozess."""
+        out: dict = {}
+        try:
+            for entry in os.scandir(PROC):
+                if not entry.name.isdigit():
+                    continue
+                try:
+                    with open(f"{PROC}/{entry.name}/io") as f:
+                        r = w = 0
+                        for line in f:
+                            if line.startswith("read_bytes:"):
+                                r = int(line.split()[1])
+                            elif line.startswith("write_bytes:"):
+                                w = int(line.split()[1])
+                    out[int(entry.name)] = (r, w)
+                except (OSError, ValueError):
+                    continue
+        except OSError:
+            pass
+        return out
+
+    def _disk_tick(self, mono: float, dt: float) -> list:
+        """Disk-Raten pro Prozess: kumulative Zähler -> Rate + EMA + Decay.
+
+        Gleiche Glättungslogik wie die Netzwerk-Prozesse (kein Flackern,
+        Zeilen verschwinden nach DECAY_S ohne neue Messwerte)."""
+        disk_now = self._disk_read()
+        disk_raw: dict = {}
+        if self._disk_prev and dt > 0:
+            for pid, (r, w) in disk_now.items():
+                prev = self._disk_prev.get(pid)
+                if prev is None:
+                    continue
+                dr = max(0.0, (r - prev[0]) / dt)
+                dw = max(0.0, (w - prev[1]) / dt)
+                if dr <= 0 and dw <= 0:
+                    continue
+                name = self.comm_for(pid)
+                e = disk_raw.setdefault(name, [0.0, 0.0])
+                e[0] += dr
+                e[1] += dw
+                ns = self.netns_of(pid)
+                if ns:
+                    cname = self._containers.get(ns)
+                    if cname:
+                        self._disk_cont.setdefault(name, cname)
+        # Nur lebende PIDs behalten (Speicherbegrenzung)
+        self._disk_prev = disk_now
+
+        # --- EMA + Aktivitäts-Decay ---
+        for name, (r, w) in disk_raw.items():
+            old = self._disk_ema.get(name)
+            if old:
+                self._disk_ema[name] = {
+                    "read": EMA * r + (1 - EMA) * old["read"],
+                    "write": EMA * w + (1 - EMA) * old["write"],
+                }
+            else:
+                self._disk_ema[name] = {"read": r, "write": w}
+            self._disk_active[name] = mono
+
+        emitted = {}
+        for name, ema in self._disk_ema.items():
+            last = self._disk_active.get(name, 0.0)
+            if (mono - last) >= DECAY_S:
+                continue
+            if name not in disk_raw:
+                ema = {"read": ema["read"] * (1 - EMA),
+                       "write": ema["write"] * (1 - EMA)}
+            emitted[name] = ema
+        self._disk_ema = {k: v for k, v in self._disk_ema.items() if k in emitted}
+        self._disk_active = {k: v for k, v in self._disk_active.items() if k in emitted}
+        self._disk_cont = {k: v for k, v in self._disk_cont.items() if k in emitted}
+
+        out = [
+            {"name": n, "read": round(v["read"], 1), "write": round(v["write"], 1),
+             "container": self._disk_cont.get(n)}
+            for n, v in emitted.items() if v["read"] + v["write"] > 0.5
+        ]
+        out.sort(key=lambda p: p["read"] + p["write"], reverse=True)
+        return out
 
     # ------------------------------------------------------------------
     # Docker-Socket (optional): Prozess/Container-Zuordnung
@@ -599,6 +695,9 @@ class Sampler:
                                key=lambda kv: kv[1]["rx"] + kv[1]["tx"], reverse=True)
         ]
 
+        # Disk-I/O pro Prozess (unabhängig von ss/Netzwerk)
+        disk_list = self._disk_tick(mono, dt)
+
         with self.lock:
             self._last = {
                 "version": load_version(),
@@ -609,6 +708,7 @@ class Sampler:
                 "interfaces": iface_list,
                 "processes": procs_list,
                 "containers": containers_list,
+                "disk": disk_list,
                 "ss_error": self._ss_error,
                 "ss_ok": ss is not None,
                 # Diagnose: pid1 != Container-Init -> pid:host aktiv
@@ -637,6 +737,7 @@ class Sampler:
                     "interfaces": [],
                     "processes": [],
                     "containers": [],
+                    "disk": [],
                     "ss_error": self._ss_error,
                     "ss_ok": False,
                     "pid1": self._pid1_comm(),
