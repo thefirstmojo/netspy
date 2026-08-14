@@ -38,7 +38,7 @@ read/write rates per process. **One image, two roles, one compose.**
   transfers show up on the reading process). EMA-smoothed with activity decay,
   sortable by process / server / read / write, with container badges.
 
-![Disk I/O tab](docs/screenshots/disk-tab.svg)
+![Disk I/O tab](docs/screenshots/disk-tab.png)
 *Disk I/O tab with live data — processes with their real read/write rates and container badges.*
 
 - **Artifact protection** (v0.3.3x): docker-proxy double-counting eliminated
