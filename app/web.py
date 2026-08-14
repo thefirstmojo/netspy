@@ -61,44 +61,102 @@ def parse_servers(spec: str) -> list:
 
 
 def config_path(config_dir: str) -> str:
+    return os.path.join(config_dir, "servers.yaml")
+
+
+def config_legacy_path(config_dir: str) -> str:
     return os.path.join(config_dir, "servers.json")
 
 
 def config_writable(config_dir: str) -> bool:
-    """True, wenn <config_dir> existiert/anlegbar und schreibbar ist."""
+    """Nur True, wenn <config_dir> ein GEMOUNTETES Volume ist.
+
+    Ein Verzeichnis, das der Container selbst im Image-Layer anlegt, wuerde
+    ein Container-Recreate/Update nicht ueberleben — Speichern dorthin waere
+    nutzlos. Erkennung: gemountete Verzeichnisse liegen auf einem anderen
+    Dateisystem (st_dev) als der Container-Root."""
     try:
         os.makedirs(config_dir, exist_ok=True)
-        return os.access(config_dir, os.W_OK)
+        if not os.access(config_dir, os.W_OK):
+            return False
+        root_dev = os.stat("/").st_dev
+        return os.stat(config_dir).st_dev != root_dev
     except OSError:
         return False
 
 
-def load_servers(env_servers: str, config_dir: str) -> list:
-    """servers.json gewinnt, wenn vorhanden + valide; sonst Env-Fallback.
+def _valid_servers(data) -> list | None:
+    """Normalisiert eine Server-Liste (dict-Liste) oder None wenn ungueltig.
 
-    So bleiben alte Installationen ohne Volume unveraendert funktionsfaehig.
-    Defekte/leere Dateien fallen ebenfalls auf die Env-Variablen zurueck."""
-    path = config_path(config_dir)
+    'local' wird zu url=None normalisiert (lokaler Sampler)."""
+    if not (isinstance(data, list) and data):
+        return None
+    out = []
+    for s in data:
+        if not (isinstance(s, dict) and s.get("name")):
+            return None
+        url = s.get("url")
+        if url is not None and str(url).strip().lower() == "local":
+            url = None
+        out.append({"name": str(s["name"]), "url": url})
+    return out
+
+
+def _read_file(path: str):
     try:
         with open(path) as f:
-            data = json.load(f)
-        if (isinstance(data, list) and data
-                and all(isinstance(s, dict) and s.get("name") for s in data)):
-            return [{"name": str(s["name"]), "url": s.get("url")} for s in data]
-    except (OSError, ValueError):
-        pass
+            return f.read()
+    except OSError:
+        return None
+
+
+def load_servers(env_servers: str, config_dir: str) -> list:
+    """servers.yaml gewinnt, dann servers.json (Legacy-Migration),
+    sonst Env-Fallback. Alte Installationen bleiben funktionsfaehig."""
+    # 1) servers.yaml (menscheneditierbar, neu ab v0.5.1)
+    txt = _read_file(config_path(config_dir))
+    if txt is not None:
+        try:
+            import yaml
+            v = _valid_servers(yaml.safe_load(txt))
+            if v:
+                return v
+        except Exception:
+            pass
+    # 2) servers.json (v0.5.0) — Migration
+    txt = _read_file(config_legacy_path(config_dir))
+    if txt is not None:
+        try:
+            v = _valid_servers(json.loads(txt))
+            if v:
+                return v
+        except Exception:
+            pass
+    # 3) Env-Fallback
     return parse_servers(env_servers)
 
 
 def save_servers(servers: list, config_dir: str) -> str:
-    """Speichert die Server-Liste atomar nach <config_dir>/servers.json.
-
-    Wirft OSError, wenn der Pfad nicht schreibbar ist (kein Volume gemountet)."""
+    """Speichert die Server-Liste atomar als menscheneditierbares
+    servers.yaml. Wirft OSError, wenn der Pfad nicht schreibbar ist."""
     os.makedirs(config_dir, exist_ok=True)
     path = config_path(config_dir)
     tmp = path + ".tmp"
+    header = (
+        "# NetSpy - Server-Konfiguration (vom Settings-Tab geschrieben, "
+        "manuell editierbar)\n"
+        "# url: 'local' = diesen Host direkt sampeln, "
+        "oder http://host:8091 = Agent-API eines anderen Hosts\n"
+    )
+    dumpable = [{"name": s["name"], "url": s.get("url") or "local"}
+                for s in servers]
+    try:
+        import yaml
+        body = yaml.safe_dump(dumpable, allow_unicode=True, sort_keys=False)
+    except ImportError:
+        body = json.dumps(dumpable, indent=2)
     with open(tmp, "w") as f:
-        json.dump(servers, f, indent=2)
+        f.write(header + body)
     os.replace(tmp, path)
     return path
 
@@ -190,8 +248,12 @@ class Monitor:
         workers = max(4, len(self.servers))
         with ThreadPoolExecutor(max_workers=workers) as ex:
             while True:
-                for name, snap, err, ms in ex.map(self._poll_one, self.servers):
+                for name, snap, err, ms in ex.map(self._poll_one, list(self.servers)):
                     with self.lock:
+                        if name not in self.latency:
+                            # Server wurde inzwischen ueber die Settings
+                            # entfernt (set_servers) — Rennbedingung abfangen
+                            continue
                         if snap is not None:
                             self.snaps[name] = snap
                             self.online[name] = True
@@ -466,32 +528,36 @@ class WebHandler(BaseHTTPRequestHandler):
                 return
             if not config_writable(mon.config_dir):
                 hint = (
-                    f"Config-Ordner {mon.config_dir} ist nicht beschreibbar. "
-                    "Binde ein Volume ein, damit die Einstellungen gespeichert "
-                    "werden koennen. In der docker-compose.yml des NetSpy-Web-"
-                    "Containers ergaenzen (Beispiel Unraid):\n\n"
+                    f"Config-Ordner {mon.config_dir} ist kein gemountetes Volume "
+                    "(Speichern dort wuerde ein Update nicht ueberleben). "
+                    "Binde ein Volume ein — in der docker-compose.yml des "
+                    "NetSpy-Web-Containers ergaenzen (Beispiel Unraid, "
+                    "Verzeichnis vorher anlegen):\n\n"
                     "    volumes:\n"
-                    "      - /mnt/user/appdata/netspy:/data\n\n"
+                    "      - /mnt/user/appdata/netspy/config:/config\n\n"
                     "Fuer andere Systeme entsprechend z. B.:\n"
-                    "      - /opt/netspy-data:/data\n\n"
+                    "      - /opt/netspy-config:/config\n\n"
                     "Danach Container neu erstellen (docker compose up -d bzw. "
-                    "Stack neu deployen). Ohne Volume funktioniert die "
-                    "Konfiguration ueber die SERVERS-Umgebungsvariable weiter."
+                    "Stack neu deployen). Die Serverliste wird dann als "
+                    "menscheneditierbare servers.yaml gespeichert. Ohne Volume "
+                    "funktioniert die Konfiguration ueber die SERVERS-"
+                    "Umgebungsvariable weiter (Fallback)."
                 )
                 self._send_bytes(409, json.dumps({
-                    "error": "config dir not writable", "hint": hint
+                    "error": "config dir is not a mounted volume", "hint": hint
                 }).encode(), "application/json")
                 return
             try:
-                save_servers(cleaned, mon.config_dir)
+                path = save_servers(cleaned, mon.config_dir)
                 mon.set_servers(cleaned)
             except OSError as e:
                 self._send_bytes(500, json.dumps({
                     "error": f"save failed: {e}",
-                    "hint": "Volume nicht beschreibbar? Siehe /api/settings.",
+                    "hint": "Volume nicht schreibbar? Siehe /api/settings.",
                 }).encode(), "application/json")
                 return
-            self._send_bytes(200, b'{"ok":true}', "application/json")
+            self._send_bytes(200, json.dumps({"ok": True, "path": path}).encode(),
+                             "application/json")
             return
         self._send_bytes(404, b"not found", "text/plain")
 
@@ -509,7 +575,7 @@ def start_web(monitor: Monitor, port: int = 8090) -> ThreadingHTTPServer:
 
 
 def main() -> None:
-    config_dir = os.environ.get("CONFIG_DIR", "/data")
+    config_dir = os.environ.get("CONFIG_DIR", "/config")
     servers = load_servers(os.environ.get("SERVERS", "Unraid=local"), config_dir)
     token = os.environ.get("AGENT_TOKEN", "")
     mon = Monitor(

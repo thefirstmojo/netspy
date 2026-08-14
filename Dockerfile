@@ -8,6 +8,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
+# pyyaml: menscheneditierbare servers.yaml für die Settings-Page
+RUN pip install --no-cache-dir pyyaml
+
 WORKDIR /app
 COPY app/ /app/
 COPY VERSION /app/VERSION

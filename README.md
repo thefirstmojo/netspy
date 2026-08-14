@@ -224,7 +224,7 @@ All values are set **directly in `docker-compose.yml`** (no `.env` file):
 | `AGENT_PORT` | `8091` | Host port of the agent API (same) |
 | `AGENT_TOKEN` | empty | Header `X-Agent-Token` (must match on all hosts) |
 | `DOCKER_SOCK` | `/var/run/docker.sock` (web) | Docker socket for container rows; `""` disables |
-| `CONFIG_DIR` | `/data` (web) | Writable volume for `servers.json` (settings UI). Without a volume the `SERVERS` env is used as fallback |
+| `CONFIG_DIR` | `/config` (web) | Writable volume for `servers.yaml` (settings UI, human-editable YAML). Without a volume the `SERVERS` env is used as fallback |
 
 Plus two commented option blocks in the compose, enabled per host:
 - **AppArmor** (`security_opt: [apparmor:unconfined]`) — hosts that enforce an

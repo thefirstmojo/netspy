@@ -86,12 +86,12 @@ services:
     #
     # ── Settings page (web role): the server list can be managed in the  ──
     # ── web UI (🛠️ Settings tab) instead of the SERVERS env var. It is   ──
-    # ── stored in <CONFIG_DIR>/servers.json. Mount a writable directory  ──
-    # ── so the settings survive container recreation:                    ──
-    # ──   Unraid:  /mnt/user/appdata/netspy:/data                        ──
-    # ──   Other:   /opt/netspy-data:/data                                ──
+    # ── stored as human-editable servers.yaml in <CONFIG_DIR>. Mount a    ──
+    # ── writable directory so the settings survive container recreation: ──
+    # ──   Unraid:  /mnt/user/appdata/netspy/config:/config               ──
+    # ──   Other:   /opt/netspy-config:/config                            ──
     # ── WITHOUT a volume the SERVERS env var keeps working (fallback)    ──
     # ── and the settings UI shows a hint on how to add the volume.       ──
-    # CONFIG_DIR defaults to /data — mount your directory exactly there.
+    # CONFIG_DIR defaults to /config — mount your directory exactly there.
     # volumes:
-    #   - /mnt/user/appdata/netspy:/data
+    #   - /mnt/user/appdata/netspy/config:/config

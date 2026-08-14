@@ -826,8 +826,9 @@ function setTab(which) {
   }
 }
 
-/* ---------- Settings (Server-Verwaltung, servers.json mit Volume-Fallback) ---------- */
+/* ---------- Settings (Server-Verwaltung, servers.yaml mit Volume-Fallback) ---------- */
 let settingsData = null;
+let settingsStatus = "";
 
 async function loadSettings() {
   try {
@@ -847,20 +848,22 @@ function renderSettings() {
     return;
   }
   const warn = settingsData.writable ? "" :
-    `<div class="sett-warn">⚠️ <b>Config-Ordner nicht beschreibbar:</b> <code>${esc(settingsData.path)}</code><br>
-      Damit die Einstellungen gespeichert werden können, binde ein Volume ein. In der
-      <code>docker-compose.yml</code> des NetSpy-Web-Containers ergänzen (Beispiel Unraid):<br>
-      <code>&nbsp;&nbsp;volumes:<br>&nbsp;&nbsp;&nbsp;&nbsp;- /mnt/user/appdata/netspy:/data</code><br>
-      Für andere Systeme z. B. <code>- /opt/netspy-data:/data</code>. Danach Container neu
-      erstellen (<code>docker compose up -d</code> bzw. Stack neu deployen).<br>
+    `<div class="sett-warn">⚠️ <b>Config-Ordner ist kein gemountetes Volume:</b> <code>${esc(settingsData.path)}</code><br>
+      Speichern dort würde ein Update nicht überleben. Binde ein Volume ein — in der
+      <code>docker-compose.yml</code> des NetSpy-Web-Containers ergänzen (Beispiel Unraid,
+      Verzeichnis vorher anlegen):<br>
+      <code>&nbsp;&nbsp;volumes:<br>&nbsp;&nbsp;&nbsp;&nbsp;- /mnt/user/appdata/netspy/config:/config</code><br>
+      Für andere Systeme z. B. <code>- /opt/netspy-config:/config</code>. Danach Container neu
+      erstellen (<code>docker compose up -d</code> bzw. Stack neu deployen). Die Serverliste
+      wird dann als menscheneditierbare <code>servers.yaml</code> gespeichert.<br>
       Ohne Volume bleibt die Konfiguration über die <code>SERVERS</code>-Umgebungsvariable aktiv (Fallback).</div>`;
   const src = settingsData.source === "file"
-    ? "servers.json (Datei)"
+    ? "servers.yaml (Datei)"
     : "SERVERS-Umgebungsvariable (Fallback)";
   const rows = (settingsData.servers || []).map((s, i) =>
     `<div class="sett-row" data-i="${i}">
        <input class="sett-name" placeholder="Name (z.B. Unraid)" value="${esc(s.name)}">
-       <input class="sett-url" placeholder="URL oder 'local' (z.B. http://10.10.10.20:8091)" value="${esc(s.url || "")}">
+       <input class="sett-url" placeholder="URL, 'local' oder leer (=lokal)" value="${esc(s.url || "local")}">
        <button class="sett-del" title="Entfernen">✕</button>
      </div>`).join("");
   box.innerHTML =
@@ -870,7 +873,7 @@ function renderSettings() {
     `<div class="sett-actions">
        <button id="sett-add">+ Server hinzufügen</button>
        <button id="sett-save" class="primary">💾 Speichern</button>
-       <span id="sett-status" class="hint"></span>
+       <span id="sett-status" class="hint">${esc(settingsStatus)}</span>
      </div>`;
   box.querySelector("#sett-add").addEventListener("click", () => {
     const list = document.getElementById("settlist");
@@ -894,11 +897,15 @@ async function saveSettings() {
     const name = row.querySelector(".sett-name").value.trim();
     const url = row.querySelector(".sett-url").value.trim();
     if (!name) continue;
-    servers.push({ name, url: url === "" ? null : url });
+    servers.push({
+      name,
+      url: (url === "" || url.toLowerCase() === "local") ? null : url,
+    });
   }
   const status = document.getElementById("sett-status");
   if (!servers.length) {
-    status.textContent = "Keine gültigen Server (Name erforderlich).";
+    settingsStatus = "Keine gültigen Server (Name erforderlich).";
+    status.textContent = settingsStatus;
     return;
   }
   try {
@@ -909,16 +916,18 @@ async function saveSettings() {
     });
     const d = await r.json().catch(() => ({}));
     if (r.ok) {
-      status.textContent = "✅ Gespeichert (" + servers.length + " Server).";
+      settingsStatus = "✅ Gespeichert (" + servers.length + " Server) → " + (d.path || "servers.yaml");
       loadSettings();
     } else if (r.status === 409 && d.hint) {
-      status.textContent = "";
+      settingsStatus = "";
       alert(d.hint);
     } else {
-      status.textContent = "Fehler: " + (d.error || r.status);
+      settingsStatus = "Fehler: " + (d.error || r.status);
+      status.textContent = settingsStatus;
     }
   } catch (e) {
-    status.textContent = "Netzwerkfehler.";
+    settingsStatus = "Netzwerkfehler.";
+    status.textContent = settingsStatus;
   }
 }
 
