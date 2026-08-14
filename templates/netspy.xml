@@ -5,17 +5,17 @@
      Agent deployments on TrueNAS/Debian use the docker-compose.yml from the repo. -->
 <Container version="2">
   <Name>NetSpy</Name>
-  <Description>Live network monitoring: per-interface, per-process and per-container throughput with 1s sampling.</Description>
-  <Overview>Web dashboard showing real-time network throughput of Unraid (and other hosts): interface rates, per-process breakdown, per-container traffic. One image, two roles — this template installs the web role; add agents on other hosts (TrueNAS/Debian) via the repo's docker-compose.yml.</Overview>
+  <Description>Live network + disk monitoring: per-interface, per-process and per-container throughput, disk I/O, CPU/RAM, latency and a settings page.</Description>
+  <Overview>Web dashboard showing real-time network + disk monitoring of Unraid (and other hosts): interface rates, per-process breakdown (incl. SMB sessions per client), per-container traffic, disk I/O per process, CPU/RAM per process and latency/health. One image, two roles — this template installs the web role; add agents on other hosts (TrueNAS/Debian) via the repo's docker-compose.yml.</Overview>
   <Category>Network:Tools:</Category>
-  <ExtraSearchTerms>network monitor traffic throughput dashboard</ExtraSearchTerms>
+  <ExtraSearchTerms>network monitor traffic throughput dashboard disk io cpu ram latency settings servers</ExtraSearchTerms>
   <ReadMe>https://raw.githubusercontent.com/thefirstmojo/netspy/main/README.md</ReadMe>
   <MinVer>6.9</MinVer>
   <MaxVer>7.3</MaxVer>
   <License>MIT</License>
   <Screenshot>https://raw.githubusercontent.com/thefirstmojo/netspy/main/docs/screenshot.png</Screenshot>
-  <Date>2026-08-05</Date>
-  <Changes>Initial release</Changes>
+  <Date>2026-08-14</Date>
+  <Changes>v0.5.x: disk I/O + CPU/RAM tabs, SMB sessions per client IP, connection counts, latency/health monitor, settings page (servers.yaml in /netspy/config), config volume added to the template</Changes>
   <Repository>ghcr.io/thefirstmojo/netspy:latest</Repository>
   <Registry>https://github.com/users/thefirstmojo/packages/container/package/netspy</Registry>
   <Support>https://github.com/thefirstmojo/netspy/issues</Support>
@@ -41,4 +41,5 @@
   <Config Name="AGENT_TOKEN" Target="AGENT_TOKEN" Default="" Mode="rw" Description="Shared token for agent API access — must be identical on the web instance and every agent (set a long random value)." Type="Variable" Display="always" Required="true" Mask="true"/>
   <Config Name="DOCKER_SOCK" Target="DOCKER_SOCK" Default="/var/run/docker.sock" Mode="rw" Description="Docker socket path for per-container rows. Keep the 'Docker Socket' path mapping below active; set to empty to disable." Type="Variable" Display="always" Required="false" Mask="false"/>
   <Config Name="Docker Socket" Target="/var/run/docker.sock" Default="/var/run/docker.sock" Mode="ro" Description="Mount the Docker socket (read-only) so container names appear in the process list (per-container throughput)." Type="Path" Display="always"/>
+  <Config Name="Config Volume" Target="/netspy" Default="/mnt/user/appdata/netspy" Mode="rw" Description="Base directory for the settings page — servers.yaml is stored in the /netspy/config subfolder (created automatically). After install, make it world-writable on the host: chmod 777 /mnt/user/appdata/netspy (container runs as root with cap_drop ALL and needs write access)." Type="Path" Display="always"/>
 </Container>
