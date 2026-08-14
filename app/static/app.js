@@ -829,8 +829,10 @@ function setTab(which) {
 /* ---------- Settings (Server-Verwaltung, servers.yaml mit Volume-Fallback) ---------- */
 let settingsData = null;
 let settingsStatus = "";
+let settingsError = "";
 
 async function loadSettings() {
+  settingsError = "";
   try {
     const r = await fetch("/api/settings");
     settingsData = await r.json();
@@ -857,6 +859,10 @@ function renderSettings() {
       erstellen (<code>docker compose up -d</code> bzw. Stack neu deployen). Die Serverliste
       wird dann als menscheneditierbare <code>servers.yaml</code> gespeichert.<br>
       Ohne Volume bleibt die Konfiguration über die <code>SERVERS</code>-Umgebungsvariable aktiv (Fallback).</div>`;
+  const errBanner = settingsError ? (
+    `<div class="sett-warn"><b>❌ NICHT GESPEICHERT</b><br>` +
+    esc(settingsError).replace(/\n/g, "<br>") + `</div>`
+  ) : "";
   const src = settingsData.source === "file"
     ? "servers.yaml (Datei)"
     : "SERVERS-Umgebungsvariable (Fallback)";
@@ -867,6 +873,7 @@ function renderSettings() {
        <button class="sett-del" title="Entfernen">✕</button>
      </div>`).join("");
   box.innerHTML =
+    errBanner +
     warn +
     `<p class="hint">Quelle: <b>${src}</b> · Datei: <code>${esc(settingsData.path)}</code></p>` +
     `<div id="settlist">${rows}</div>` +
@@ -917,10 +924,12 @@ async function saveSettings() {
     const d = await r.json().catch(() => ({}));
     if (r.ok) {
       settingsStatus = "✅ Gespeichert (" + servers.length + " Server) → " + (d.path || "servers.yaml");
+      settingsError = "";
       loadSettings();
     } else if (r.status === 409 && d.hint) {
       settingsStatus = "";
-      alert(d.hint);
+      settingsError = d.hint;
+      renderSettings();
     } else {
       settingsStatus = "Fehler: " + (d.error || r.status);
       status.textContent = settingsStatus;

@@ -401,6 +401,10 @@ class Sampler:
         except OSError:
             pass
         cpu_pct = 0.0
+        # t_d = CPU-Zuwachs ALLER Kerne in diesem Tick — wird auch von der
+        # Prozess-Schleife unten benoetigt, daher VOR dem _cpu_tot_prev-Update
+        # berechnen (sonst waere t_d immer 0 -> Prozess-CPU% immer 0).
+        t_d = 0.0
         if self._cpu_tot_prev and dt > 0 and cpu_total > self._cpu_tot_prev[0]:
             t_d = cpu_total - self._cpu_tot_prev[0]
             i_d = (cpu_total - cpu_idle) - (self._cpu_tot_prev[0] - self._cpu_tot_prev[1])
@@ -452,12 +456,9 @@ class Sampler:
                     cpu = 0.0
                     if prev is not None and dt > 0:
                         d_proc = (utime + stime) - prev
-                        if d_proc > 0 and cpu_total > 0:
+                        if d_proc > 0 and t_d > 0:
                             # Anteil an der GESAMT-CPU-Zeit des Hosts
-                            # (t_d = totaler Zuwachs aller Kerne in diesem Tick)
-                            t_d = cpu_total - self._cpu_tot_prev[0] if self._cpu_tot_prev else 0
-                            if t_d > 0:
-                                cpu = max(0.0, (d_proc / t_d) * 100.0)
+                            cpu = max(0.0, (d_proc / t_d) * 100.0)
                     self._cpu_prev[pid] = utime + stime
                     if cpu > 0.3 or mem > 5 * 1024 * 1024:
                         sys_raw[pid] = (cpu, mem)
