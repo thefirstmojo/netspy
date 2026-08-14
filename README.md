@@ -19,6 +19,7 @@ Real-time monitoring of your servers in one dashboard: **per-interface, per-proc
 - **Connection counts** — active TCP connections per process (e.g. `docker-proxy:6379` → 🔗 47)
 - **Detail charts** — click a row for its 1 h history; hover shows the exact values of that moment
 - **Server filter chips** — toggle hosts in tables and charts
+- **Latency / health** — each server card shows its live poll response time (⏱️ ms badge, green/yellow/red) plus a 5 min latency chart; a hanging agent becomes visible before it drops offline
 
 ### 💾 Disk I/O tab
 - Read/write per process from `/proc/<pid>/io` — real storage bytes **incl. CIFS/NFS** (SMB transfers show up on the reader)
@@ -26,10 +27,6 @@ Real-time monitoring of your servers in one dashboard: **per-interface, per-proc
 
 ### ⚙️ CPU/RAM tab
 - CPU% and resident RAM per process, plus per-server host totals
-
-### 🩺 Latency / health
-- Live poll response time per server — ms badge (⏱️, green/yellow/red) + 5 min latency chart
-- A hanging agent becomes visible before it drops offline
 
 ### 🛠️ Settings page
 - Add/remove servers in the UI — stored as human-editable `servers.yaml`

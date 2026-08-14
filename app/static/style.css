@@ -61,7 +61,7 @@ main { padding: 16px 20px; max-width: 1400px; margin: 0 auto; }
 .hint { color: var(--muted); font-weight: 400; font-size: 12px; }
 
 .chartgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 16px; }
-.charthead { display: flex; justify-content: space-between; align-items: center; }
+.charthead { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 .chartwrap { position: relative; height: 220px; }
 .chartlegend { display: flex; gap: 16px; margin-top: 8px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .chartlegend .lg { width: 150px; text-align: right; white-space: nowrap; }
