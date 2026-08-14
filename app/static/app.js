@@ -899,6 +899,9 @@ function renderSettings() {
   const src = settingsData.source === "file"
     ? "servers.yaml (file)"
     : "SERVERS env var (fallback)";
+  const srcBadge = settingsData.source === "file"
+    ? `<span class="srcbadge src-file" title="Server list is read from the config file">📄 config file</span>`
+    : `<span class="srcbadge src-env" title="Server list is read from the SERVERS environment variable">⚙️ env (SERVERS)</span>`;
   const rows = (settingsData.servers || []).map((s, i) =>
     `<div class="sett-row" data-i="${i}">
        <input class="sett-name" placeholder="Name (e.g. Unraid)" value="${esc(s.name)}">
@@ -906,6 +909,7 @@ function renderSettings() {
        <button class="sett-del" title="Remove">✕</button>
      </div>`).join("");
   box.innerHTML =
+    srcBadge +
     errBanner +
     okBanner +
     warn +
