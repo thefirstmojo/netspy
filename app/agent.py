@@ -19,6 +19,7 @@ Reine Standardbibliothek, keine Dependencies.
 """
 from __future__ import annotations
 
+from collections import deque
 import json
 import os
 import re
@@ -205,6 +206,8 @@ class Sampler:
         self._cpu_prev: dict = {}    # pid -> utime+stime kumulativ
         self._sys_ema: dict = {}     # name -> CPU% (geglättet)
         self._sys_active: dict = {}  # name -> monotonic timestamp
+        self._sys_ring: dict = {}    # pid -> deque(maxlen=10) rohe CPU-Werte
+        self._host_ring = deque(maxlen=10)  # Host-CPU-Rolling (10 s)
         self._sys_cont: dict = {}    # name -> container (persistent, kein Flackern)
 
     # ------------------------------------------------------------------
@@ -453,34 +456,40 @@ class Sampler:
                     except (OSError, ValueError):
                         pass
                     prev = self._cpu_prev.get(pid)
-                    cpu = 0.0
+                    cpu_raw = 0.0
                     if prev is not None and dt > 0:
                         d_proc = (utime + stime) - prev
                         if d_proc > 0 and t_d > 0:
                             # Anteil an der GESAMT-CPU-Zeit des Hosts
-                            cpu = max(0.0, (d_proc / t_d) * 100.0)
+                            cpu_raw = max(0.0, (d_proc / t_d) * 100.0)
                     self._cpu_prev[pid] = utime + stime
-                    if cpu > 0.3 or mem > 5 * 1024 * 1024:
-                        sys_raw[pid] = (cpu, mem)
+                    # 10-s-Rolling-Mittel (ein Wert pro Sekunde, gleitendes Fenster)
+                    ring = self._sys_ring.setdefault(pid, deque(maxlen=10))
+                    ring.append(cpu_raw)
+                    cpu10 = sum(ring) / len(ring) if ring else 0.0
+                    if cpu_raw > 0.3 or cpu10 > 0.3 or mem > 5 * 1024 * 1024:
+                        sys_raw[pid] = (cpu_raw, cpu10, mem)
                 except (OSError, ValueError):
                     continue
         except OSError:
             pass
-        # tote PIDs raeumen
+        # tote PIDs raeumen (auch die Ring-Puffer)
         self._cpu_prev = {k: v for k, v in self._cpu_prev.items() if k in now_pids}
+        self._sys_ring = {k: v for k, v in self._sys_ring.items() if k in now_pids}
 
         # --- EMA + Decay fuer CPU (RAM bleibt roh) ---
         sys_emitted = {}
-        for pid, (cpu, mem) in sys_raw.items():
+        for pid, (cpu_raw, cpu10, mem) in sys_raw.items():
             name = self.comm_for(pid)
             key = name
             old = self._sys_ema.get(key)
-            cpu_s = EMA * cpu + (1 - EMA) * old if old else cpu
+            cpu_s = EMA * cpu_raw + (1 - EMA) * old if old else cpu_raw
             self._sys_ema[key] = cpu_s
             self._sys_active[key] = mono
-            e = sys_emitted.setdefault(key, [0.0, 0])
+            e = sys_emitted.setdefault(key, [0.0, 0.0, 0])
             e[0] = max(e[0], cpu_s)
-            e[1] += mem
+            e[1] = max(e[1], cpu10)
+            e[2] += mem
             ns = self.netns_of(pid)
             if ns:
                 cname = self._containers.get(ns)
@@ -495,13 +504,18 @@ class Sampler:
         sys_cont = {k: v for k, v in self._sys_cont.items() if k in sys_emitted}
 
         procs = [
-            {"name": n, "cpu": round(v[0], 1), "mem": v[1],
-             "container": sys_cont.get(n)}
+            {"name": n, "cpu": round(v[0], 1), "cpu10": round(v[1], 1),
+             "mem": v[2], "container": sys_cont.get(n)}
             for n, v in sys_emitted.items()
         ]
         procs.sort(key=lambda p: p["cpu"], reverse=True)
+        # Host-CPU ebenfalls als 10-s-Rolling-Mittel
+        host_ring = self._host_ring
+        host_ring.append(cpu_pct)
+        host_cpu10 = sum(host_ring) / len(host_ring) if host_ring else 0.0
         return {
             "cpu": round(cpu_pct, 1),
+            "cpu10": round(host_cpu10, 1),
             "mem_total": mem_total,
             "mem_used": max(0, mem_total - mem_avail),
             "procs": procs,

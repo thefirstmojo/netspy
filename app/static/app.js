@@ -6,6 +6,8 @@ const state = {
   ifaceSort: {}, lastIfaces: null, lastTable: [], visible: {},
   diskSortKey: "total", diskSortDir: -1, lastDisk: [],
   sysSortKey: "cpu", sysSortDir: -1, lastSys: [], lastHostSys: {},
+  cpuMode: "live",  // "live" (EMA) | "avg10" (10 s rolling average)
+  lastServers: [],
   latencyCharts: {}, lastLatency: {},
   equalScale: false, lastSeries: null,
   detailProcs: {}, detailCharts: {},   // server -> {proc, chart}
@@ -136,7 +138,7 @@ function buildCharts(servers) {
       `<div class="chartlegend">` +
       `<span class="lg rx">▼ in ${fmt(0)}</span>` +
       `<span class="lg tx">▲ out ${fmt(0)}</span>` +
-      `<span class="lg lat-title">⏱️ Latenz</span></div>` +
+      `<span class="lg lat-title">⏱️ Latency</span></div>` +
       `<div class="chartwrap latwrap"><canvas id="lat-${esc(s.name).replace(/[^a-zA-Z0-9]/g, "_")}"></canvas></div>`;
     grid.appendChild(card);
   }
@@ -500,7 +502,7 @@ function buildTableHeader(servers) {
     `<th data-key="server" class="${cls("server")}">Server</th>` +
     `<th data-key="rx" class="sortable num ${state.sortKey === "rx" ? "active" + (state.sortDir < 0 ? " sort-desc" : "") : ""}">in</th>` +
     `<th data-key="tx" class="sortable num ${state.sortKey === "tx" ? "active" + (state.sortDir < 0 ? " sort-desc" : "") : ""}">out</th>` +
-    `<th data-key="conn" class="sortable num ${state.sortKey === "conn" ? "active" + (state.sortDir < 0 ? " sort-desc" : "") : ""}" title="aktive TCP-Verbindungen">conn</th>` +
+    `<th data-key="conn" class="sortable num ${state.sortKey === "conn" ? "active" + (state.sortDir < 0 ? " sort-desc" : "") : ""}" title="active TCP connections">conn</th>` +
     `</tr>`;
 }
 
@@ -608,8 +610,9 @@ function renderSysHosts(host_sys, servers) {
   el.innerHTML = servers.map(s => {
     const h = (host_sys && host_sys[s.name]) || {};
     const memPct = h.mem_total > 0 ? Math.round(((h.mem_used || 0) / h.mem_total) * 100) : 0;
-    return `<span class="syschip" title="Host gesamt">${esc(s.name)}: ` +
-      `<b style="color:#22d3ee">CPU ${h.cpu == null ? "–" : h.cpu + "%"}</b> · ` +
+    const cpuV = state.cpuMode === "avg10" ? h.cpu10 : h.cpu;
+    return `<span class="syschip" title="Host total">${esc(s.name)}: ` +
+      `<b style="color:#22d3ee">CPU ${cpuV == null ? "–" : cpuV + "%"}</b> · ` +
       `<b style="color:#a78bfa">RAM ${fmt(h.mem_used || 0)} / ${fmt(h.mem_total || 0)} (${memPct}%)</b></span>`;
   }).join(" ");
 }
@@ -626,10 +629,11 @@ function renderSysTable(table, servers) {
   rows.sort((a, b) => {
     let av, bv;
     const ha = a.r.hosts[a.sname] || {}, hb = b.r.hosts[b.sname] || {};
+    const cpuOf = h => (state.cpuMode === "avg10" ? (h.cpu10 ?? h.cpu) : h.cpu) || 0;
     if (state.sysSortKey === "name") { av = a.r.name.toLowerCase(); bv = b.r.name.toLowerCase(); }
     else if (state.sysSortKey === "server") { av = a.sname.toLowerCase(); bv = b.sname.toLowerCase(); }
     else if (state.sysSortKey === "mem") { av = ha.mem || 0; bv = hb.mem || 0; }
-    else { av = ha.cpu || 0; bv = hb.cpu || 0; }
+    else { av = cpuOf(ha); bv = cpuOf(hb); }
     if (av < bv) return -state.sysSortDir;
     if (av > bv) return state.sysSortDir;
     return 0;
@@ -639,10 +643,11 @@ function renderSysTable(table, servers) {
     let badge = "";
     if (r.container) badge = `<span class="cont">${esc(r.container)}</span>`;
     const h = r.hosts[sname] || {};
+    const cpuV = state.cpuMode === "avg10" ? (h.cpu10 ?? h.cpu) : h.cpu;
     return `<tr data-server="${esc(sname)}" data-proc="${esc(r.name)}">` +
       `<td class="pname">${esc(r.name)}${badge}</td>` +
       `<td class="srv">${esc(sname)}</td>` +
-      `<td class="num cpu">${h.cpu == null ? "–" : h.cpu.toFixed(1) + " %"}</td>` +
+      `<td class="num cpu">${cpuV == null ? "–" : cpuV.toFixed(1) + " %"}</td>` +
       `<td class="num mem">${h.mem == null ? "–" : fmt(h.mem)}</td></tr>`;
   }).join("");
 }
@@ -753,6 +758,7 @@ async function refresh() {
   state.lastSys = d.system || [];
   state.lastHostSys = d.host_sys || {};
   state.lastLatency = d.latency || {};
+  state.lastServers = d.servers || [];
   state.lastSeries = d.series;
   /* Prozess-History pro Server (eingefrorene Hover-Werte, synchron zu den Chart-ts) */
   for (const srv of d.servers) {
@@ -809,7 +815,16 @@ document.getElementById("systhead").addEventListener("click", e => {
   if (state.lastSys) renderSysTable(state.lastSys, state.servers.map(n => ({ name: n })));
 });
 
-/* Tab-Umschaltung: Netzwerk / Disk / CPU-RAM / Settings */
+document.getElementById("cpumode").addEventListener("click", e => {
+  state.cpuMode = state.cpuMode === "live" ? "avg10" : "live";
+  const btn = e.target;
+  btn.textContent = state.cpuMode === "avg10" ? "📊 10 s avg" : "⚡ live";
+  btn.classList.toggle("active", state.cpuMode === "avg10");
+  renderSysHosts(state.lastHostSys, state.lastServers);
+  renderSysTable(state.lastSys, state.lastServers);
+});
+
+/* Tab-Umschaltung: Network / Disk / CPU-RAM / Settings */
 document.getElementById("tabbtn-net").addEventListener("click", () => setTab("net"));
 document.getElementById("tabbtn-disk").addEventListener("click", () => setTab("disk"));
 document.getElementById("tabbtn-sys").addEventListener("click", () => setTab("sys"));
@@ -854,48 +869,48 @@ function renderSettings() {
   const box = document.getElementById("settingsbox");
   if (!box) return;
   if (!settingsData) {
-    box.innerHTML = `<p class="hint">Einstellungen konnten nicht geladen werden.</p>`;
+    box.innerHTML = `<p class="hint">Settings could not be loaded.</p>`;
     return;
   }
   const warn = settingsData.writable ? "" :
-    `<div class="sett-warn">⚠️ <b>Config-Ordner ist kein gemountetes Volume:</b> <code>${esc(settingsData.path)}</code><br>
-      Speichern dort würde ein Update nicht überleben. Binde ein Volume ein — in der
-      <code>docker-compose.yml</code> des NetSpy-Web-Containers ergänzen (Beispiel Unraid,
-      Verzeichnis vorher anlegen):<br>
+    `<div class="sett-warn">⚠️ <b>Config folder is not a mounted volume:</b> <code>${esc(settingsData.path)}</code><br>
+      Saving there would not survive an update. Mount a volume — in the
+      <code>docker-compose.yml</code> of the NetSpy web container (Unraid example,
+      create the directory first):<br>
       <code>&nbsp;&nbsp;volumes:<br>&nbsp;&nbsp;&nbsp;&nbsp;- /mnt/user/appdata/netspy:/netspy</code><br>
-      Der Unterordner <code>/netspy/config</code> (und später z. B. <code>/netspy/data</code>)
-      wird vom Container automatisch angelegt.<br>
-      Für andere Systeme z. B. <code>- /opt/netspy:/netspy</code>. Danach Container neu
-      erstellen (<code>docker compose up -d</code> bzw. Stack neu deployen). Die Serverliste
-      wird dann als menscheneditierbare <code>servers.yaml</code> gespeichert.<br>
-      Ohne Volume bleibt die Konfiguration über die <code>SERVERS</code>-Umgebungsvariable aktiv (Fallback).</div>`;
+      The <code>/netspy/config</code> subfolder (and later e.g. <code>/netspy/data</code>)
+      is created automatically by the container.<br>
+      For other systems e.g. <code>- /opt/netspy:/netspy</code>. Then recreate the
+      container (<code>docker compose up -d</code> / redeploy the stack). The server list
+      is stored as human-editable <code>servers.yaml</code>.<br>
+      Without a volume the <code>SERVERS</code> environment variable stays active (fallback).</div>`;
   const okBanner = (settingsData.writable && settingsData.source === "env" && settingsData.has_template) ?
-    `<div class="sett-ok">✅ <b>Volume erkannt</b> — Vorlage angelegt: <code>${esc(settingsData.path)}</code><br>
-      Die Datei liegt jetzt auf dem Host (sichtbarer Beweis). Die Server kommen noch aus der
-      <code>SERVERS</code>-Umgebungsvariable — speichere einmal über die UI (übernimmt die
-      aktuellen Server) oder editiere die <code>servers.yaml</code> direkt.</div>` : "";
+    `<div class="sett-ok">✅ <b>Volume detected</b> — template created: <code>${esc(settingsData.path)}</code><br>
+      The file now lives on the host (visible proof). Servers still come from the
+      <code>SERVERS</code> environment variable — save once via the UI (adopts the
+      current servers) or edit <code>servers.yaml</code> directly.</div>` : "";
   const errBanner = settingsError ? (
-    `<div class="sett-warn"><b>❌ NICHT GESPEICHERT</b><br>` +
+    `<div class="sett-warn"><b>❌ NOT SAVED</b><br>` +
     esc(settingsError).replace(/\n/g, "<br>") + `</div>`
   ) : "";
   const src = settingsData.source === "file"
-    ? "servers.yaml (Datei)"
-    : "SERVERS-Umgebungsvariable (Fallback)";
+    ? "servers.yaml (file)"
+    : "SERVERS env var (fallback)";
   const rows = (settingsData.servers || []).map((s, i) =>
     `<div class="sett-row" data-i="${i}">
-       <input class="sett-name" placeholder="Name (z.B. Unraid)" value="${esc(s.name)}">
-       <input class="sett-url" placeholder="URL, 'local' oder leer (=lokal)" value="${esc(s.url || "local")}">
-       <button class="sett-del" title="Entfernen">✕</button>
+       <input class="sett-name" placeholder="Name (e.g. Unraid)" value="${esc(s.name)}">
+       <input class="sett-url" placeholder="URL, 'local' or empty (=local)" value="${esc(s.url || "local")}">
+       <button class="sett-del" title="Remove">✕</button>
      </div>`).join("");
   box.innerHTML =
     errBanner +
     okBanner +
     warn +
-    `<p class="hint">Quelle: <b>${src}</b> · Datei: <code>${esc(settingsData.path)}</code></p>` +
+    `<p class="hint">Source: <b>${src}</b> · File: <code>${esc(settingsData.path)}</code></p>` +
     `<div id="settlist">${rows}</div>` +
     `<div class="sett-actions">
-       <button id="sett-add">+ Server hinzufügen</button>
-       <button id="sett-save" class="primary">💾 Speichern</button>
+       <button id="sett-add">+ Add server</button>
+       <button id="sett-save" class="primary">💾 Save</button>
        <span id="sett-status" class="hint">${esc(settingsStatus)}</span>
      </div>`;
   box.querySelector("#sett-add").addEventListener("click", () => {
@@ -927,7 +942,7 @@ async function saveSettings() {
   }
   const status = document.getElementById("sett-status");
   if (!servers.length) {
-    settingsStatus = "Keine gültigen Server (Name erforderlich).";
+    settingsStatus = "No valid servers (name required).";
     status.textContent = settingsStatus;
     return;
   }
@@ -939,7 +954,7 @@ async function saveSettings() {
     });
     const d = await r.json().catch(() => ({}));
     if (r.ok) {
-      settingsStatus = "✅ Gespeichert (" + servers.length + " Server) → " + (d.path || "servers.yaml");
+      settingsStatus = "✅ Saved (" + servers.length + " servers) → " + (d.path || "servers.yaml");
       settingsError = "";
       loadSettings();
     } else if (r.status === 409 && d.hint) {
@@ -947,11 +962,11 @@ async function saveSettings() {
       settingsError = d.hint;
       renderSettings();
     } else {
-      settingsStatus = "Fehler: " + (d.error || r.status);
+      settingsStatus = "Error: " + (d.error || r.status);
       status.textContent = settingsStatus;
     }
   } catch (e) {
-    settingsStatus = "Netzwerkfehler.";
+    settingsStatus = "Network error.";
     status.textContent = settingsStatus;
   }
 }

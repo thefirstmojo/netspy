@@ -374,7 +374,9 @@ class Monitor:
                 sysd = snap.get("system") or {}
                 for p in sysd.get("procs", []):
                     row = stable.setdefault(p["name"], {"hosts": {}})
-                    row["hosts"][name] = {"cpu": p["cpu"], "mem": p["mem"]}
+                    row["hosts"][name] = {"cpu": p["cpu"],
+                                          "cpu10": p.get("cpu10", 0.0),
+                                          "mem": p["mem"]}
                     if p.get("container"):
                         row.setdefault("container", p["container"])
             srows = []
@@ -557,22 +559,20 @@ class WebHandler(BaseHTTPRequestHandler):
                 return
             if not config_writable(mon.config_dir):
                 hint = (
-                    f"Config-Ordner {mon.config_dir} ist kein gemountetes Volume "
-                    "(Speichern dort wuerde ein Update nicht ueberleben). "
-                    "Binde ein Volume ein — in der docker-compose.yml des "
-                    "NetSpy-Web-Containers ergaenzen (Beispiel Unraid, "
-                    "Verzeichnis vorher anlegen):\n\n"
+                    f"Config folder {mon.config_dir} is not a mounted volume "
+                    "(saving there would not survive an update). Mount a "
+                    "volume — in the docker-compose.yml of the NetSpy web "
+                    "container add (Unraid example, create the directory first):\n\n"
                     "    volumes:\n"
                     "      - /mnt/user/appdata/netspy:/netspy\n\n"
-                    "Der Unterordner /netspy/config (und spaeter z. B. "
-                    "/netspy/data) wird vom Container automatisch angelegt.\n"
-                    "Fuer andere Systeme entsprechend z. B.:\n"
+                    "The /netspy/config subfolder (and later e.g. /netspy/data) "
+                    "is created automatically by the container.\n"
+                    "For other systems e.g.:\n"
                     "      - /opt/netspy:/netspy\n\n"
-                    "Danach Container neu erstellen (docker compose up -d bzw. "
-                    "Stack neu deployen). Die Serverliste wird dann als "
-                    "menscheneditierbare servers.yaml gespeichert. Ohne Volume "
-                    "funktioniert die Konfiguration ueber die SERVERS-"
-                    "Umgebungsvariable weiter (Fallback)."
+                    "Then recreate the container (docker compose up -d / "
+                    "redeploy the stack). The server list is stored as "
+                    "human-editable servers.yaml. Without a volume the "
+                    "SERVERS environment variable keeps working (fallback)."
                 )
                 self._send_bytes(409, json.dumps({
                     "error": "config dir is not a mounted volume", "hint": hint
@@ -628,15 +628,15 @@ def resolve_config_dir(env_dir: str) -> str:
     return "/netspy/config"
 
 
-TEMPLATE = """# NetSpy - Server-Konfiguration
-# Diese Datei wird vom NetSpy-Web-Container verwaltet (Settings-Tab) und ist
-# manuell editierbar. Eingetragene Server gewinnen gegen die SERVERS-Umgebungsvariable.
+TEMPLATE = """# NetSpy - Server configuration
+# Managed by the NetSpy web container (Settings tab); also human-editable.
+# Servers listed here win over the SERVERS environment variable.
 #
-# Format: eine Liste von Servern, die das Dashboard ueberwacht:
-#   url: 'local'          = diesen Host direkt sampeln (Web-Rolle)
-#   url: http://host:8091 = Agent-API eines anderen Hosts (z.B. TrueNAS)
+# Format: a list of servers the dashboard monitors:
+#   url: 'local'          = sample this host directly (web role)
+#   url: http://host:8091 = agent API of another host (e.g. TrueNAS)
 #
-# Beispiele (auskommentiert - hier eintragen oder ueber die UI speichern):
+# Examples (commented out - add here or via the settings UI):
 # - name: Main
 #   url: local
 # - name: Remote

@@ -21,7 +21,7 @@
   <div class="filterrow">
     <div id="serverfilter" class="serverfilter"></div>
     <div id="tabs" class="tabs" role="tablist">
-      <button id="tabbtn-net" class="tabbtn active" role="tab" aria-selected="true">🌐 Netzwerk</button>
+      <button id="tabbtn-net" class="tabbtn active" role="tab" aria-selected="true">🌐 Network</button>
       <button id="tabbtn-disk" class="tabbtn" role="tab" aria-selected="false">💾 Disk I/O</button>
       <button id="tabbtn-sys" class="tabbtn" role="tab" aria-selected="false">⚙️ CPU/RAM</button>
       <button id="tabbtn-settings" class="tabbtn" role="tab" aria-selected="false">🛠️ Settings</button>
@@ -57,12 +57,12 @@
         </table>
       </div>
     </details>
-    <p class="hint" style="margin:8px 4px">Wer belastet gerade die Festplatte(n)? read/write sind die tatsächlichen Bytes von/auf die Storage-Schicht (inkl. CIFS/NFS-Mounts) pro Sekunde.</p>
+    <p class="hint" style="margin:8px 4px">Who is loading the disk(s)? read/write are the real bytes to/from the storage layer (incl. CIFS/NFS mounts) per second.</p>
   </section>
 
   <section id="panel-sys" class="tabpanel hidden">
     <details class="card" open>
-      <summary>CPU / RAM by process <span class="hint">(click a column header to sort)</span></summary>
+      <summary>CPU / RAM by process <span class="hint">(click a column header to sort)</span> <button id="cpumode" class="chip-btn" title="Switch between live (EMA-smoothed) and 10 s rolling average">⚡ live</button></summary>
       <div id="syshosts" class="syshosts"></div>
       <div class="tablewrap">
         <table id="systable">
