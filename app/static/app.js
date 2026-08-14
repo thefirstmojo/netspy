@@ -890,8 +890,8 @@ function renderSettings() {
   const okBanner = (settingsData.writable && settingsData.source === "env" && settingsData.has_template) ?
     `<div class="sett-ok">✅ <b>Volume detected</b> — template created: <code>${esc(settingsData.path)}</code><br>
       The file now lives on the host (visible proof). Servers still come from the
-      <code>SERVERS</code> environment variable — save once via the UI (adopts the
-      current servers) or edit <code>servers.yaml</code> directly.</div>` : "";
+      <code>SERVERS</code> environment variable — add servers via the UI below
+      or edit <code>servers.yaml</code> directly.</div>` : "";
   const errBanner = settingsError ? (
     `<div class="sett-warn"><b>❌ NOT SAVED</b><br>` +
     esc(settingsError).replace(/\n/g, "<br>") + `</div>`
