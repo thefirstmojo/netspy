@@ -125,9 +125,10 @@ td.srv { color: var(--muted); }
 .lat-bad { background: rgba(239,68,68,.2); color: #f87171; }
 .syshosts { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 2px 10px; }
 .syschip { background: rgba(148,163,184,.08); border: 1px solid rgba(148,163,184,.2); border-radius: 8px; padding: 4px 10px; font-size: 12px; color: #cbd5e1; }
-.chip-btn { background: rgba(148,163,184,.08); border: 1px solid rgba(148,163,184,.3); color: var(--text); border-radius: 6px; padding: 2px 8px; font: inherit; font-size: 11px; cursor: pointer; margin-left: 8px; vertical-align: middle; }
-.chip-btn:hover { border-color: rgba(148,163,184,.6); }
-.chip-btn.active { background: rgba(34,197,94,.15); border-color: rgba(34,197,94,.5); color: #4ade80; }
+.chip-btn { background: transparent; border: 1px solid var(--border, rgba(148,163,184,.25)); color: var(--text-secondary, #94a3b8); border-radius: 8px; padding: 4px 10px; font: inherit; font-size: 11px; cursor: pointer; transition: all .15s ease; }
+.chip-btn:hover { border-color: var(--rx, #22d3ee); color: var(--text, #e2e8f0); }
+.chip-btn.active { background: rgba(34,211,238,.12); border-color: var(--rx, #22d3ee); color: var(--rx, #22d3ee); }
+.cpumode { display: inline-flex; gap: 4px; margin-left: 10px; vertical-align: middle; }
 .settingsbox { padding: 4px 2px; }
 .sett-warn { background: rgba(239,68,68,.08); border: 1px solid rgba(239,68,68,.4); color: #fca5a5; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 13px; line-height: 1.5; }
 .sett-ok { background: rgba(34,197,94,.08); border: 1px solid rgba(34,197,94,.4); color: #86efac; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 13px; line-height: 1.5; }

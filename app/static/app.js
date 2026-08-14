@@ -815,14 +815,17 @@ document.getElementById("systhead").addEventListener("click", e => {
   if (state.lastSys) renderSysTable(state.lastSys, state.servers.map(n => ({ name: n })));
 });
 
-document.getElementById("cpumode").addEventListener("click", e => {
-  state.cpuMode = state.cpuMode === "live" ? "avg10" : "live";
-  const btn = e.target;
-  btn.textContent = state.cpuMode === "avg10" ? "📊 10 s avg" : "⚡ live";
-  btn.classList.toggle("active", state.cpuMode === "avg10");
+function setCpuMode(mode) {
+  state.cpuMode = mode;
+  const live = document.getElementById("cpumode-live");
+  const avg = document.getElementById("cpumode-avg10");
+  if (live) live.classList.toggle("active", mode === "live");
+  if (avg) avg.classList.toggle("active", mode === "avg10");
   renderSysHosts(state.lastHostSys, state.lastServers);
   renderSysTable(state.lastSys, state.lastServers);
-});
+}
+document.getElementById("cpumode-live").addEventListener("click", () => setCpuMode("live"));
+document.getElementById("cpumode-avg10").addEventListener("click", () => setCpuMode("avg10"));
 
 /* Tab-Umschaltung: Network / Disk / CPU-RAM / Settings */
 document.getElementById("tabbtn-net").addEventListener("click", () => setTab("net"));
