@@ -136,7 +136,7 @@ function buildCharts(servers) {
       `<div class="chartlegend">` +
       `<span class="lg rx">▼ in ${fmt(0)}</span>` +
       `<span class="lg tx">▲ out ${fmt(0)}</span>` +
-      `<span class="lg lat-title">Latenz</span></div>` +
+      `<span class="lg lat-title">⏱️ Latenz</span></div>` +
       `<div class="chartwrap latwrap"><canvas id="lat-${esc(s.name).replace(/[^a-zA-Z0-9]/g, "_")}"></canvas></div>`;
     grid.appendChild(card);
   }
@@ -378,8 +378,16 @@ function renderStatusbar(servers) {
     if (!badge) continue;
     const t = s.totals || { rx: 0, tx: 0 };
     badge.className = "badge " + (s.online ? "ok" : "bad");
+    // Verbindungen dieses Servers aus der aktuellen Tabelle summieren
+    let conns = 0;
+    for (const r of (state.lastTable || [])) {
+      const h = r.hosts && r.hosts[s.name];
+      if (h && h.conns) conns += h.conns;
+    }
     badge.innerHTML = s.online
-      ? `online · <span class="bn">▼ ${fmt(t.rx)}</span> <span class="bn">▲ ${fmt(t.tx)}</span>`
+      ? `<span class="bstat">online</span> <span class="bn">▼ ${fmt(t.rx)}</span> <span class="bn">▲ ${fmt(t.tx)}</span>` +
+        (conns ? `<span class="bn conns">🔗 ${conns}</span>` : "") +
+        `<span class="lat"></span>`
       : "offline";
     const lg = document.querySelectorAll("#chart-" + s.name.replace(/[^a-zA-Z0-9]/g, "_") + " .chartlegend .lg");
     if (lg.length === 2) { lg[0].textContent = "▼ in " + fmt(t.rx); lg[1].textContent = "▲ out " + fmt(t.tx); }
@@ -664,7 +672,7 @@ function updateLatency(latency) {
       badge.appendChild(b);
     }
     b.className = "lat " + cls;
-    b.textContent = " " + last.toFixed(0) + " ms";
+    b.textContent = "⏱️ " + last.toFixed(0) + " ms";
   }
 }
 

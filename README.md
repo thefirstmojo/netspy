@@ -11,15 +11,29 @@ Real-time monitoring of your servers in one dashboard: **per-interface, per-proc
 
 ## Features
 
-| Area | What you get |
-|---|---|
-| 🌐 **Network** | Interface rates + per-process TCP rates (tracked per socket inode, immune to fork spikes) + per-container rows (via read-only Docker socket). Click a row for its 1 h history chart; hover shows the exact values of that moment. Server filter chips toggle hosts in tables and charts. |
-| 💾 **Disk I/O** | Read/write per process from `/proc/<pid>/io` — real storage bytes **incl. CIFS/NFS** (SMB transfers show up on the reader). EMA-smoothed, sortable by process / server / read / write. |
-| 👥 **SMB sessions** | `smbd` rows are split per client IP (`smbd[10.0.0.5]`) — you see exactly which client is loading a share. |
-| 🔌 **Connections** | Active TCP connections per process (e.g. `docker-proxy:6379` with 47 conns) — explains pooling and traffic patterns at a glance. |
-| ⚙️ **CPU/RAM** | CPU% and resident RAM per process, plus per-server host totals. |
-| 🩺 **Latency/health** | Live poll response time per server (ms badge, green/yellow/red thresholds) + 5 min latency chart — a hanging agent becomes visible before it drops offline. |
-| 🛠️ **Settings page** | Add/remove servers in the UI — stored as human-editable `servers.yaml`. Works without a volume too (env fallback); the UI explains what to mount. |
+### 🌐 Network tab
+- **Per-process rates** — TCP tracked per socket inode (immune to fork spikes), capped at the physical link rate
+- **Interface rates** — total traffic of the default-route interface(s), auto-detected
+- **Per-container rows** — bridge containers via read-only Docker socket
+- **SMB sessions** — `smbd` rows split per client IP (`smbd[10.0.0.5]`): you see exactly which client is loading a share
+- **Connection counts** — active TCP connections per process (e.g. `docker-proxy:6379` → 🔗 47)
+- **Detail charts** — click a row for its 1 h history; hover shows the exact values of that moment
+- **Server filter chips** — toggle hosts in tables and charts
+
+### 💾 Disk I/O tab
+- Read/write per process from `/proc/<pid>/io` — real storage bytes **incl. CIFS/NFS** (SMB transfers show up on the reader)
+- EMA-smoothed, sortable by process / server / read / write
+
+### ⚙️ CPU/RAM tab
+- CPU% and resident RAM per process, plus per-server host totals
+
+### 🩺 Latency / health
+- Live poll response time per server — ms badge (⏱️, green/yellow/red) + 5 min latency chart
+- A hanging agent becomes visible before it drops offline
+
+### 🛠️ Settings page
+- Add/remove servers in the UI — stored as human-editable `servers.yaml`
+- Works without a volume too (env fallback); the UI explains what to mount
 
 ![Disk I/O tab](docs/screenshots/disk-tab.png)
 
@@ -31,7 +45,7 @@ Real-time monitoring of your servers in one dashboard: **per-interface, per-proc
 
 | You want to… | Do this |
 |---|---|
-| **Install on Unraid** | **Apps → Settings → Template Repositories →** add `https://github.com/thefirstmojo/netspy` → **Apps → NetSpy → Install**. Set `SERVERS` (e.g. `Main=local`) and `AGENT_TOKEN`; everything else has sensible defaults. |
+| **Install on Unraid** | It's in the **Unraid Community App Store**: **Apps → NetSpy → Install**. Set `SERVERS` (e.g. `Main=local`) and `AGENT_TOKEN`; everything else has sensible defaults. |
 | **Add an agent** (TrueNAS/Debian/…) | Copy `docker-compose.yml` to that host → set `ROLE: agent`, `SERVERS: ""`, `UPLINK` (e.g. `eth0`), same `AGENT_TOKEN`. On **TrueNAS** also uncomment `security_opt: [apparmor:unconfined]` (minimal relaxation, no `privileged`). Deploy via Portainer stack or `docker compose up -d`. |
 
 All settings stay editable later under **Docker → NetSpy → edit**. Pin the image tag (`ghcr.io/thefirstmojo/netspy:vX.Y`) for deterministic updates; with `:latest` tick "Pull latest image" when updating.

@@ -3,10 +3,21 @@
 WICHTIG: NUR Dummy-Daten verwenden — niemals echte Server-/Prozessnamen,
 echte IPs oder echte Messwerte in oeffentliche Repo-Screenshots!
 
-Nutzung: lokale NetSpy-Instanz laufen lassen (http://127.0.0.1:8090),
-dann dieses Skript ausfuehren."""
-import json, math, time
+Nutzung: lokale NetSpy-Instanz laufen lassen, URL als Argument (oder env NETSPY_URL,
+Default http://127.0.0.1:8090), dann dieses Skript ausfuehren:
+  python3 tools/make_fake_shots.py http://192.168.2.101:8090
+Die API-Daten werden IMMER durch Dummy-Daten ersetzt (Route-Interception)."""
+import json, math, os, sys, time
 from playwright.sync_api import sync_playwright
+
+BASE = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("NETSPY_URL", "http://127.0.0.1:8090")
+
+# Version aus der VERSION-Datei des Repos (Screenshots zeigen den aktuellen Stand)
+try:
+    with open(os.path.join(os.path.dirname(__file__), "..", "VERSION")) as f:
+        VERSION = f.read().strip()
+except OSError:
+    VERSION = "0.0.0"
 
 NOW = time.time()
 TS = [NOW - (300 - i) * 2.5 for i in range(121)]  # 5 min
@@ -16,10 +27,10 @@ def wave(base, amp, i, phase=0.0):
 
 SERVERS = [
     {"name": "Main", "url": None, "online": True, "error": "",
-     "hostname": "mainhost", "version": "0.5.5",
+     "hostname": "mainhost", "version": VERSION,
      "totals": {"rx": 420.0, "tx": 180.0}},
     {"name": "Remote", "url": "http://10.10.10.20:8091", "online": True, "error": "",
-     "hostname": "remotehost", "version": "0.5.5",
+     "hostname": "remotehost", "version": VERSION,
      "totals": {"rx": 95.0, "tx": 40.0}},
 ]
 
@@ -67,7 +78,7 @@ SYSROWS = [
 ]
 
 FAKE = {
-    "version": "0.5.5",
+    "version": VERSION,
     "servers": SERVERS,
     "series": {
         s["name"]: {"ts": TS,
@@ -99,7 +110,7 @@ with sync_playwright() as p:
         status=200, content_type="application/json", body=BODY))
     pg.route("**/api/prochistory", lambda route: route.fulfill(
         status=200, content_type="application/json", body='{"Main":{"ts":[],"rx":[],"tx":[]},"Remote":{"ts":[],"rx":[],"tx":[]}}'))
-    pg.goto("http://127.0.0.1:8090", timeout=20000)
+    pg.goto(BASE, timeout=20000)
     pg.wait_for_load_state("networkidle")
     pg.wait_for_timeout(2500)
     pg.screenshot(path="docs/screenshot.png")
