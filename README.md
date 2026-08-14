@@ -129,6 +129,16 @@ chmod 777 /mnt/user/appdata/netspy      # Unraid
 chmod 777 /opt/netspy                   # other hosts
 ```
 
+**Why the container runs as root (no alternative):** NetSpy samples the real
+host through the host PID namespace — it reads `/proc` and `ss` of *all*
+processes: socket→process attribution (`/proc/<pid>/fd` + `SYS_PTRACE`),
+disk I/O (`/proc/<pid>/io`) and CPU/RAM (`/proc/<pid>/stat`, VmRSS) of every
+process, including daemons owned by root (e.g. smbd). Reading another
+user's `/proc/<pid>/io` or `/proc/<pid>/stat` requires root. Running as
+PUID/PGID 99:100 (like most Unraid containers) would silently produce empty
+process lists, so root is not a configuration choice — it is required for
+the measurements to work at all.
+
 > ⚠️ **Do NOT add `--cap-add=DAC_OVERRIDE` just to make the config writable.**
 > That capability lets the (root) container bypass **all** file permission
 > checks — including on every other directory mounted into it. Fix the folder
