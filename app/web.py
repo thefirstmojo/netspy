@@ -464,11 +464,15 @@ class WebHandler(BaseHTTPRequestHandler):
         if path == "/api/settings":
             mon = self.server.monitor
             writable = config_writable(mon.config_dir)
-            src = "file" if os.path.exists(config_path(mon.config_dir)) else "env"
+            src = _config_source(mon.config_dir)
+            cfg_path = config_path(mon.config_dir)
+            has_template = (src == "env"
+                            and os.path.exists(cfg_path))
             body = json.dumps({
-                "path": config_path(mon.config_dir),
+                "path": cfg_path,
                 "writable": writable,
                 "source": src,
+                "has_template": has_template,
                 "servers": [
                     {"name": s["name"], "url": s.get("url")}
                     for s in mon.servers
@@ -599,6 +603,67 @@ def resolve_config_dir(env_dir: str) -> str:
     return "/netspy/config"
 
 
+TEMPLATE = """# NetSpy - Server-Konfiguration
+# Diese Datei wird vom NetSpy-Web-Container verwaltet (Settings-Tab) und ist
+# manuell editierbar. Eingetragene Server gewinnen gegen die SERVERS-Umgebungsvariable.
+#
+# Format: eine Liste von Servern, die das Dashboard ueberwacht:
+#   url: 'local'          = diesen Host direkt sampeln (Web-Rolle)
+#   url: http://host:8091 = Agent-API eines anderen Hosts (z.B. TrueNAS)
+#
+# Beispiele (auskommentiert - hier eintragen oder ueber die UI speichern):
+# - name: Unraid
+#   url: local
+# - name: TrueNAS
+#   url: http://10.10.10.20:8091
+# - name: Debian
+#   url: http://10.10.10.21:8091
+"""
+
+
+def init_config_template(config_dir: str) -> bool:
+    """Legt beim Start eine leere servers.yaml-Vorlage an — NUR wenn ein
+    Volume gemountet ist (sonst wuerde sie im Container-Layer landen und
+    ein Update nicht ueberleben). Rueckgabe: True wenn geschrieben.
+
+    Eine reine Kommentar-Datei ist fuer load_servers ungueltig -> die
+    SERVERS-Umgebungsvariable bleibt aktiv, bis echte Eintraege folgen."""
+    if not config_writable(config_dir):
+        return False
+    path = config_path(config_dir)
+    if os.path.exists(path):
+        return False
+    try:
+        os.makedirs(config_dir, exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            f.write(TEMPLATE)
+        os.replace(tmp, path)
+        return True
+    except OSError:
+        return False
+
+
+def _config_source(config_dir: str) -> str:
+    """'file' wenn eine valide Server-Liste in yaml/json liegt, sonst 'env'."""
+    txt = _read_file(config_path(config_dir))
+    if txt is not None:
+        try:
+            import yaml
+            if _valid_servers(yaml.safe_load(txt)):
+                return "file"
+        except Exception:
+            pass
+    txt = _read_file(config_legacy_path(config_dir))
+    if txt is not None:
+        try:
+            if _valid_servers(json.loads(txt)):
+                return "file"
+        except Exception:
+            pass
+    return "env"
+
+
 def main() -> None:
     config_dir = resolve_config_dir(os.environ.get("CONFIG_DIR", ""))
     servers = load_servers(os.environ.get("SERVERS", "Unraid=local"), config_dir)
@@ -610,6 +675,10 @@ def main() -> None:
         token=token,
         config_dir=config_dir,
     )
+    # Beim Start: leere servers.yaml-Vorlage anlegen (nur bei gemountetem
+    # Volume) — sichtbarer Beweis auf dem Host, dass der Pfad korrekt ist.
+    if init_config_template(config_dir):
+        print(f"[config] Vorlage angelegt: {config_path(config_dir)}")
     start_web(mon, port=int(os.environ.get("WEB_PORT", "8090")))
 
     # Web-Rolle stellt zusaetzlich eine Agent-API bereit, wenn lokal gesampelt wird

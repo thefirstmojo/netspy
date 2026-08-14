@@ -861,6 +861,11 @@ function renderSettings() {
       erstellen (<code>docker compose up -d</code> bzw. Stack neu deployen). Die Serverliste
       wird dann als menscheneditierbare <code>servers.yaml</code> gespeichert.<br>
       Ohne Volume bleibt die Konfiguration über die <code>SERVERS</code>-Umgebungsvariable aktiv (Fallback).</div>`;
+  const okBanner = (settingsData.writable && settingsData.source === "env" && settingsData.has_template) ?
+    `<div class="sett-ok">✅ <b>Volume erkannt</b> — Vorlage angelegt: <code>${esc(settingsData.path)}</code><br>
+      Die Datei liegt jetzt auf dem Host (sichtbarer Beweis). Die Server kommen noch aus der
+      <code>SERVERS</code>-Umgebungsvariable — speichere einmal über die UI (übernimmt die
+      aktuellen Server) oder editiere die <code>servers.yaml</code> direkt.</div>` : "";
   const errBanner = settingsError ? (
     `<div class="sett-warn"><b>❌ NICHT GESPEICHERT</b><br>` +
     esc(settingsError).replace(/\n/g, "<br>") + `</div>`
@@ -876,6 +881,7 @@ function renderSettings() {
      </div>`).join("");
   box.innerHTML =
     errBanner +
+    okBanner +
     warn +
     `<p class="hint">Quelle: <b>${src}</b> · Datei: <code>${esc(settingsData.path)}</code></p>` +
     `<div id="settlist">${rows}</div>` +
