@@ -854,8 +854,10 @@ function renderSettings() {
       Speichern dort würde ein Update nicht überleben. Binde ein Volume ein — in der
       <code>docker-compose.yml</code> des NetSpy-Web-Containers ergänzen (Beispiel Unraid,
       Verzeichnis vorher anlegen):<br>
-      <code>&nbsp;&nbsp;volumes:<br>&nbsp;&nbsp;&nbsp;&nbsp;- /mnt/user/appdata/netspy/config:/config</code><br>
-      Für andere Systeme z. B. <code>- /opt/netspy-config:/config</code>. Danach Container neu
+      <code>&nbsp;&nbsp;volumes:<br>&nbsp;&nbsp;&nbsp;&nbsp;- /mnt/user/appdata/netspy:/netspy</code><br>
+      Der Unterordner <code>/netspy/config</code> (und später z. B. <code>/netspy/data</code>)
+      wird vom Container automatisch angelegt.<br>
+      Für andere Systeme z. B. <code>- /opt/netspy:/netspy</code>. Danach Container neu
       erstellen (<code>docker compose up -d</code> bzw. Stack neu deployen). Die Serverliste
       wird dann als menscheneditierbare <code>servers.yaml</code> gespeichert.<br>
       Ohne Volume bleibt die Konfiguration über die <code>SERVERS</code>-Umgebungsvariable aktiv (Fallback).</div>`;

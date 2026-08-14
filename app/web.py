@@ -534,9 +534,11 @@ class WebHandler(BaseHTTPRequestHandler):
                     "NetSpy-Web-Containers ergaenzen (Beispiel Unraid, "
                     "Verzeichnis vorher anlegen):\n\n"
                     "    volumes:\n"
-                    "      - /mnt/user/appdata/netspy/config:/config\n\n"
+                    "      - /mnt/user/appdata/netspy:/netspy\n\n"
+                    "Der Unterordner /netspy/config (und spaeter z. B. "
+                    "/netspy/data) wird vom Container automatisch angelegt.\n"
                     "Fuer andere Systeme entsprechend z. B.:\n"
-                    "      - /opt/netspy-config:/config\n\n"
+                    "      - /opt/netspy:/netspy\n\n"
                     "Danach Container neu erstellen (docker compose up -d bzw. "
                     "Stack neu deployen). Die Serverliste wird dann als "
                     "menscheneditierbare servers.yaml gespeichert. Ohne Volume "
@@ -574,8 +576,31 @@ def start_web(monitor: Monitor, port: int = 8090) -> ThreadingHTTPServer:
     return server
 
 
+def resolve_config_dir(env_dir: str) -> str:
+    """CONFIG_DIR-Env, sonst automatisch erkennen:
+    - /netspy gemountet (neu, Unterordner-Struktur)  -> /netspy/config
+    - /config gemountet (alte Composes)               -> /config
+    - sonst Default /netspy/config (Warnung via UI).
+    Gibt immer einen Pfad zurueck; das Verzeichnis wird bei Bedarf
+    (config_writable/save_servers) automatisch angelegt."""
+    if env_dir:
+        return env_dir
+    root_dev = 0
+    try:
+        root_dev = os.stat("/").st_dev
+    except OSError:
+        pass
+    for cand in ("/netspy", "/config"):
+        try:
+            if os.path.isdir(cand) and os.stat(cand).st_dev != root_dev:
+                return cand + "/config" if cand == "/netspy" else cand
+        except OSError:
+            continue
+    return "/netspy/config"
+
+
 def main() -> None:
-    config_dir = os.environ.get("CONFIG_DIR", "/config")
+    config_dir = resolve_config_dir(os.environ.get("CONFIG_DIR", ""))
     servers = load_servers(os.environ.get("SERVERS", "Unraid=local"), config_dir)
     token = os.environ.get("AGENT_TOKEN", "")
     mon = Monitor(

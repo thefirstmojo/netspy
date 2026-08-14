@@ -53,12 +53,15 @@ read/write rates per process. **One image, two roles, one compose.**
   response time (ms badge with green/yellow/red thresholds) and a 5 min
   latency chart — hanging agents become visible before they drop offline.
 - **🛠️ Settings page** (v0.5) — manage servers in the web UI (name + URL).
-  Settings are stored in `<CONFIG_DIR>/servers.json` (mount a volume, e.g.
-  `/mnt/user/appdata/netspy:/data`). **Backwards compatible:** without a
-  volume the `SERVERS` env var keeps working (fallback), existing composes
-  are untouched, and the first save adopts the current env servers as base.
-  The UI shows an explicit hint (with compose example) when the config dir is
-  not writable.
+  Settings are stored in `<CONFIG_DIR>/servers.yaml` (human-editable YAML).
+  Mount a writable base directory — `/netspy/config` (and later e.g.
+  `/netspy/data`) is created automatically by the container: e.g.
+  `/mnt/user/appdata/netspy:/netspy` on Unraid, `/opt/netspy:/netspy` elsewhere.
+  **Backwards compatible:** without a volume the `SERVERS` env var keeps
+  working (fallback), existing composes (incl. old `/config` mounts) are
+  detected automatically, and the first save adopts the current env servers
+  as base. The UI shows an explicit hint (with compose example) when the
+  config dir is not writable.
 - **Artifact protection** (v0.3.3x): docker-proxy double-counting eliminated
   (only the ingress side of each proxied connection counts), per-process rates
   are clamped to the physical interface rate, and the process sum can never
@@ -224,7 +227,7 @@ All values are set **directly in `docker-compose.yml`** (no `.env` file):
 | `AGENT_PORT` | `8091` | Host port of the agent API (same) |
 | `AGENT_TOKEN` | empty | Header `X-Agent-Token` (must match on all hosts) |
 | `DOCKER_SOCK` | `/var/run/docker.sock` (web) | Docker socket for container rows; `""` disables |
-| `CONFIG_DIR` | `/config` (web) | Writable volume for `servers.yaml` (settings UI, human-editable YAML). Without a volume the `SERVERS` env is used as fallback |
+| `CONFIG_DIR` | auto: `/netspy/config` (web) | Writable volume for `servers.yaml` (settings UI, human-editable YAML). Auto-detected: `/netspy` mount → `/netspy/config`; old `/config` mounts keep working. Without a volume the `SERVERS` env is used as fallback |
 
 Plus two commented option blocks in the compose, enabled per host:
 - **AppArmor** (`security_opt: [apparmor:unconfined]`) — hosts that enforce an
