@@ -69,18 +69,28 @@ def config_legacy_path(config_dir: str) -> str:
 
 
 def config_writable(config_dir: str) -> bool:
-    """Nur True, wenn <config_dir> ein GEMOUNTETES Volume ist.
+    """Nur True, wenn <config_dir> ein GEMOUNTETES Volume ist UND wirklich
+    beschrieben werden kann (Schreib-Test + Dateisystem-Vergleich).
 
     Ein Verzeichnis, das der Container selbst im Image-Layer anlegt, wuerde
     ein Container-Recreate/Update nicht ueberleben — Speichern dorthin waere
     nutzlos. Erkennung: gemountete Verzeichnisse liegen auf einem anderen
-    Dateisystem (st_dev) als der Container-Root."""
+    Dateisystem (st_dev) als der Container-Root. Zusaetzlich wird ein echter
+    Schreib-Test gemacht (faengt z. B. fehlende Rechte bei cap_drop: [ALL]
+    ohne CAP_DAC_OVERRIDE auf fremden 755-Verzeichnissen)."""
     try:
-        os.makedirs(config_dir, exist_ok=True)
+        os.makedirs(config_dir, exist_ok=True, mode=0o777)
         if not os.access(config_dir, os.W_OK):
             return False
         root_dev = os.stat("/").st_dev
-        return os.stat(config_dir).st_dev != root_dev
+        if os.stat(config_dir).st_dev == root_dev:
+            return False
+        # Echter Schreib-Test (Datei anlegen + loeschen)
+        probe = os.path.join(config_dir, ".write_test")
+        with open(probe, "w") as f:
+            f.write("ok")
+        os.remove(probe)
+        return True
     except OSError:
         return False
 
@@ -139,7 +149,7 @@ def load_servers(env_servers: str, config_dir: str) -> list:
 def save_servers(servers: list, config_dir: str) -> str:
     """Speichert die Server-Liste atomar als menscheneditierbares
     servers.yaml. Wirft OSError, wenn der Pfad nicht schreibbar ist."""
-    os.makedirs(config_dir, exist_ok=True)
+    os.makedirs(config_dir, exist_ok=True, mode=0o777)
     path = config_path(config_dir)
     tmp = path + ".tmp"
     header = (
@@ -157,6 +167,8 @@ def save_servers(servers: list, config_dir: str) -> str:
         body = json.dumps(dumpable, indent=2)
     with open(tmp, "w") as f:
         f.write(header + body)
+    # Auch auf dem Host editierbar machen (Unraid: uid 99/users)
+    os.chmod(tmp, 0o666)
     os.replace(tmp, path)
     return path
 
@@ -468,11 +480,24 @@ class WebHandler(BaseHTTPRequestHandler):
             cfg_path = config_path(mon.config_dir)
             has_template = (src == "env"
                             and os.path.exists(cfg_path))
+            # Diagnose (fuer Fehlersuche): Dateisystem-IDs + Schreib-Test
+            dev_root = dev_cfg = None
+            try:
+                dev_root = os.stat("/").st_dev
+            except OSError:
+                pass
+            try:
+                os.makedirs(mon.config_dir, exist_ok=True, mode=0o777)
+                dev_cfg = os.stat(mon.config_dir).st_dev
+            except OSError:
+                pass
             body = json.dumps({
                 "path": cfg_path,
                 "writable": writable,
                 "source": src,
                 "has_template": has_template,
+                "diag": {"dev_root": dev_root, "dev_cfg": dev_cfg,
+                         "mounted": dev_cfg is not None and dev_cfg != dev_root},
                 "servers": [
                     {"name": s["name"], "url": s.get("url")}
                     for s in mon.servers
@@ -634,10 +659,11 @@ def init_config_template(config_dir: str) -> bool:
     if os.path.exists(path):
         return False
     try:
-        os.makedirs(config_dir, exist_ok=True)
+        os.makedirs(config_dir, exist_ok=True, mode=0o777)
         tmp = path + ".tmp"
         with open(tmp, "w") as f:
             f.write(TEMPLATE)
+        os.chmod(tmp, 0o666)
         os.replace(tmp, path)
         return True
     except OSError:
