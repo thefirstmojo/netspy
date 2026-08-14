@@ -174,10 +174,10 @@ def save_servers(servers: list, config_dir: str) -> str:
     path = config_path(config_dir)
     tmp = path + ".tmp"
     header = (
-        "# NetSpy - Server-Konfiguration (vom Settings-Tab geschrieben, "
-        "manuell editierbar)\n"
-        "# url: 'local' = diesen Host direkt sampeln, "
-        "oder http://host:8091 = Agent-API eines anderen Hosts\n"
+        "# NetSpy - Server configuration (written by the Settings tab, "
+        "also human-editable)\n"
+        "# url: 'local' = sample this host directly, "
+        "or http://host:8091 = agent API of another host\n"
     )
     dumpable = [{"name": s["name"], "url": s.get("url") or "local"}
                 for s in servers]
@@ -572,8 +572,8 @@ class WebHandler(BaseHTTPRequestHandler):
                 self._send_bytes(400, b'{"error":"invalid body"}', "application/json")
                 return
             servers = data.get("servers")
-            if not isinstance(servers, list) or not servers:
-                self._send_bytes(400, b'{"error":"servers must be a non-empty list"}',
+            if not isinstance(servers, list):
+                self._send_bytes(400, b'{"error":"servers must be a list"}',
                                  "application/json")
                 return
             cleaned = []
@@ -585,9 +585,8 @@ class WebHandler(BaseHTTPRequestHandler):
                     continue
                 url = s.get("url")
                 cleaned.append({"name": name, "url": (url or None)})
-            if not cleaned:
-                self._send_bytes(400, b'{"error":"no valid servers"}', "application/json")
-                return
+            # Eine leere Liste ist erlaubt: die Config wird geleert, die
+            # env-Server bleiben aktiv (merge_servers faellt auf sie zurueck).
             if not config_writable(mon.config_dir):
                 hint = (
                     f"Config folder {mon.config_dir} is not a mounted volume "

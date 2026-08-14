@@ -974,13 +974,13 @@ async function saveSettings() {
     });
   }
   const status = document.getElementById("sett-status");
-  if (!servers.length) {
-    settingsStatus = skippedEnv
-      ? "Nothing to save — env servers are not imported (edit a row to move it to the config)."
-      : "No valid servers (name required).";
+  if (!servers.length && !skippedEnv) {
+    settingsStatus = "No valid servers (name required).";
     status.textContent = settingsStatus;
     return;
   }
+  // Leere Liste ist ok, wenn env-Zeilen vorhanden sind: Config leeren,
+  // die env-Server bleiben aktiv
   try {
     const r = await fetch("/api/settings", {
       method: "POST",
