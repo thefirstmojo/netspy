@@ -637,12 +637,10 @@ TEMPLATE = """# NetSpy - Server-Konfiguration
 #   url: http://host:8091 = Agent-API eines anderen Hosts (z.B. TrueNAS)
 #
 # Beispiele (auskommentiert - hier eintragen oder ueber die UI speichern):
-# - name: Unraid
+# - name: Main
 #   url: local
-# - name: TrueNAS
+# - name: Remote
 #   url: http://10.10.10.20:8091
-# - name: Debian
-#   url: http://10.10.10.21:8091
 """
 
 
