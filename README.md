@@ -2,282 +2,109 @@
 
 [![Build](https://github.com/thefirstmojo/netspy/actions/workflows/publish-image.yml/badge.svg)](https://github.com/thefirstmojo/netspy/actions/workflows/publish-image.yml)
 
-Web dashboard showing **interface and per-process network throughput** of Unraid
-and other servers in real time (1 s sampling) — plus a **Disk I/O tab** with
-read/write rates per process. **One image, two roles, one compose.**
+Real-time monitoring of your servers in one dashboard: **per-interface, per-process and per-container network throughput**, **disk I/O per process**, **CPU/RAM**, and **latency/health** — 1 s sampling, no database, no `.env` file. **One image, two roles, one compose.**
 
 ![NetSpy dashboard](docs/screenshot.png)
-*Screenshot shows synthetic demo data (two servers "Main"/"Backup") — no real hosts or containers.*
+*Screenshots show synthetic demo data — no real hosts, IPs or containers.*
 
-> **⚠️ Must run with `network_mode: host`** (host networking). The sampler needs
-> the host's `/proc` and `ss` data to measure real host traffic — in bridge mode
-> it would only see the container's own interfaces.
->
-> **Runs as root** (container uid 0): host PID namespace, `/proc/<pid>` reads
-> and the optional Docker socket require root — there is no non-root mode.
-> For the same reason the ports are configured via `WEB_PORT`/`AGENT_PORT` (the value IS the
-> host port; a `8090:8090` mapping is ignored with host networking).
-
-| Role | Purpose | Where |
-|---|---|---|
-| `ROLE=web` | Web UI (:8090) + local sampler + agent API (:8091) | Unraid |
-| `ROLE=agent` | Sampler + agent API only (:8091) | TrueNAS |
+---
 
 ## Features
 
-- **Live network throughput** per server (1 s sampling): interface rates,
-  per-process rates (TCP, tracked per socket inode — immune to fork/handover
-  spikes) and per-container rows (veth → container, via the read-only Docker
-  socket).
-- **Detail charts per process** — click any table row to get its own 1 h
-  history chart; hover shows the exact values plus the top processes of that
-  exact moment (frozen tooltip).
-- **Server filter chips** — toggle which servers appear in tables and charts.
-- **💾 Disk I/O tab** (v0.4) — read/write rates per process from
-  `/proc/<pid>/io` (real storage-layer bytes, **incl. CIFS/NFS mounts**, so SMB
-  transfers show up on the reading process). EMA-smoothed with activity decay,
-  sortable by process / server / read / write, with container badges.
+| Area | What you get |
+|---|---|
+| 🌐 **Network** | Interface rates + per-process TCP rates (tracked per socket inode, immune to fork spikes) + per-container rows (via read-only Docker socket). Click a row for its 1 h history chart; hover shows the exact values of that moment. Server filter chips toggle hosts in tables and charts. |
+| 💾 **Disk I/O** | Read/write per process from `/proc/<pid>/io` — real storage bytes **incl. CIFS/NFS** (SMB transfers show up on the reader). EMA-smoothed, sortable by process / server / read / write. |
+| 👥 **SMB sessions** | `smbd` rows are split per client IP (`smbd[10.0.0.5]`) — you see exactly which client is loading a share. |
+| 🔌 **Connections** | Active TCP connections per process (e.g. `docker-proxy:6379` with 47 conns) — explains pooling and traffic patterns at a glance. |
+| ⚙️ **CPU/RAM** | CPU% and resident RAM per process, plus per-server host totals. |
+| 🩺 **Latency/health** | Live poll response time per server (ms badge, green/yellow/red thresholds) + 5 min latency chart — a hanging agent becomes visible before it drops offline. |
+| 🛠️ **Settings page** | Add/remove servers in the UI — stored as human-editable `servers.yaml`. Works without a volume too (env fallback); the UI explains what to mount. |
 
 ![Disk I/O tab](docs/screenshots/disk-tab.png)
-*Disk I/O tab with live data — processes with their real read/write rates and container badges.*
 
-- **SMB sessions per client** (v0.5) — `smbd` rows are broken down per client
-  IP (`smbd[10.0.0.5]`) so you see exactly which client is loading the
-  share (instead of one aggregated `smbd` row).
-- **Connection count column** (v0.5) — active TCP connections per process
-  (e.g. `docker-proxy:6379` with 47 conns) — instantly explains traffic
-  patterns and pooling.
-- **⚙️ CPU/RAM tab** (v0.5) — CPU% and resident RAM per process from
-  `/proc/stat` + `/proc/<pid>/stat` + VmRSS, plus per-server host totals.
-- **Latency / health monitor** (v0.5) — each server shows its live poll
-  response time (ms badge with green/yellow/red thresholds) and a 5 min
-  latency chart — hanging agents become visible before they drop offline.
-- **🛠️ Settings page** (v0.5) — manage servers in the web UI (name + URL).
-  Settings are stored in `<CONFIG_DIR>/servers.yaml` (human-editable YAML).
-  Mount a writable base directory — `/netspy/config` (and later e.g.
-  `/netspy/data`) is created automatically by the container: e.g.
-  `/mnt/user/appdata/netspy:/netspy` on Unraid, `/opt/netspy:/netspy` elsewhere.
-  **Backwards compatible:** without a volume the `SERVERS` env var keeps
-  working (fallback), existing composes (incl. old `/config` mounts) are
-  detected automatically, and the first save adopts the current env servers
-  as base. The UI shows an explicit hint (with compose example) when the
-  config dir is not writable.
-- **Artifact protection** (v0.3.3x): docker-proxy double-counting eliminated
-  (only the ingress side of each proxied connection counts), per-process rates
-  are clamped to the physical interface rate, and the process sum can never
-  exceed the host total (excess lands in the "not assigned" row).
-- **Host-network containers** get no container badge (they share the host netns
-  and are indistinguishable from host processes — avoids false attribution).
-- **1 h history** in the web container's memory (no DB needed).
+> **⚠️ Requirements:** `network_mode: host` (the sampler needs the host's `/proc` and `ss`) and **root** (host PID namespace, `/proc/<pid>` reads, optional Docker socket — there is no non-root mode). Ports are set via `WEB_PORT`/`AGENT_PORT` — with host networking the value *is* the host port.
+
+---
+
+## Quick start
+
+| You want to… | Do this |
+|---|---|
+| **Install on Unraid** | **Apps → Settings → Template Repositories →** add `https://github.com/thefirstmojo/netspy` → **Apps → NetSpy → Install**. Set `SERVERS` (e.g. `Main=local`) and `AGENT_TOKEN`; everything else has sensible defaults. |
+| **Add an agent** (TrueNAS/Debian/…) | Copy `docker-compose.yml` to that host → set `ROLE: agent`, `SERVERS: ""`, `UPLINK` (e.g. `eth0`), same `AGENT_TOKEN`. On **TrueNAS** also uncomment `security_opt: [apparmor:unconfined]` (minimal relaxation, no `privileged`). Deploy via Portainer stack or `docker compose up -d`. |
+
+All settings stay editable later under **Docker → NetSpy → edit**. Pin the image tag (`ghcr.io/thefirstmojo/netspy:vX.Y`) for deterministic updates; with `:latest` tick "Pull latest image" when updating.
+
+## Configuration
+
+All values live directly in `docker-compose.yml` — no `.env` file.
+
+| Key | Default | Description |
+|---|---|---|
+| `ROLE` | `web` | `web` (UI + sampler) or `agent` (sampler only) |
+| `SERVERS` | `Main=local` | `Name=local;Name=http://host:8091` — semicolon-separated |
+| `UPLINK` | auto (default route) | Comma-separated override, e.g. `br0,bond0` |
+| `WEB_PORT` / `AGENT_PORT` | `8090` / `8091` | Host ports (host networking — the values ARE the external ports) |
+| `AGENT_TOKEN` | empty | Shared `X-Agent-Token` header — **must match on all hosts** |
+| `DOCKER_SOCK` | `/var/run/docker.sock` (web) | Docker socket for per-container rows; `""` disables |
+| `CONFIG_DIR` | auto-detected | Volume for `servers.yaml` — `/netspy` mount → `/netspy/config`; old `/config` mounts keep working |
+
+Plus two commented blocks in the compose, enabled per host: **AppArmor** (`security_opt: [apparmor:unconfined]`, hosts that enforce it) and the **Docker socket** volume.
 
 ## Architecture
 
 ```
 Unraid 10.10.10.10                        TrueNAS 10.10.10.20
-┌──────────────────────────────┐        ┌─────────────────────────┐
-│ netspy (ROLE=web)            │        │ netspy (ROLE=agent)     │
-│  :8090 Web UI                │◄──────►│  :8091 /api/metrics      │
-│  :8091 /api/metrics          │  HTTP  │  /proc + ss (inet_diag)  │
-│  /proc + ss (inet_diag)      │        └─────────────────────────┘
-└──────────────────────────────┘
+┌──────────────────────────────┐         ┌─────────────────────────┐
+│ netspy (ROLE=web)            │  HTTP   │ netspy (ROLE=agent)     │
+│  :8090 Web UI                │◄───────►│  :8091 /api/metrics      │
+│  :8091 /api/metrics          │  poll   │  /proc + ss (inet_diag)  │
+└──────────────────────────────┘         └─────────────────────────┘
 ```
 
-Everything is driven by **one `docker-compose.yml`** — all configuration lives
-directly in the file, **no `.env` file required**. `ROLE` decides what the
-container does, `SERVERS` tells the dashboard where the connections go. Copy
-the compose to each host and adjust the values there.
-
-**Server-agent principle:** the web instance (server) polls every agent once
-per second over HTTP. Agents never push or initiate connections — they only
-answer `/api/metrics` requests on their port. A dashboard that cannot reach an
-agent simply marks it offline; the other hosts keep working.
+The **web instance polls every agent once per second**; agents never initiate connections. An unreachable agent is simply marked offline — the rest keeps working.
 
 ## Security
 
-**Network (threat model):**
+- **Plain HTTP, one shared token** — `AGENT_TOKEN` (as `X-Agent-Token`) is the only access control and does **not** encrypt anything. **LAN / trusted network only**; don't expose ports 8090/8091 without a VPN or TLS reverse proxy. The token is never written to logs.
+- **Hardened container:** `cap_drop: [ALL]` with only `SYS_PTRACE` added, Docker socket read-only and off by default.
+- **Root is required** — NetSpy reads `/proc` and `ss` of *all* processes (incl. root daemons like smbd): socket attribution, `/proc/<pid>/io`, `/proc/<pid>/stat`. Reading another user's proc files needs root; PUID/PGID 99:100 would silently produce empty lists. There is no non-root mode.
 
-- **Server-agent:** the web dashboard polls agents via **plain HTTP**. Agents
-  never initiate connections in the other direction.
-- **Authentication:** one shared `AGENT_TOKEN` (sent as the `X-Agent-Token`
-  header) is the only access control on the agent API. It authenticates
-  requests, but it **does not encrypt anything**.
-- **No TLS:** all traffic between dashboard and agents is **unencrypted** —
-  rates, process names and container names are readable on the wire. **Use
-  only inside a trusted local network.** Do not expose ports 8090/8091 to the
-  internet without a VPN or a TLS-terminating reverse proxy in front.
+### Config volume — make it writable
 
-**Container hardening:**
-
-- `pid: host` + root are required to read foreign PIDs (`/proc`, `ss`).
-- Mitigated by: `cap_drop: [ALL]` with only `SYS_PTRACE` added, and the
-  Docker socket mounted read-only and only on demand (off by default).
-- Set `AGENT_TOKEN` so the agent API isn't openly reachable on your LAN.
-- On TrueNAS, `security_opt: [apparmor:unconfined]` is the minimal relaxation
-  (AppArmor profile only) instead of `privileged: true`.
-
-**Config volume write access (v0.5+):**
-
-The settings page writes `servers.yaml` into the mounted config directory.
-Because the container runs as root with `cap_drop: [ALL]` (no
-`CAP_DAC_OVERRIDE`), it can only write into directories that are
-world-writable or owned by uid 0. **Recommended:** make the mounted base
-directory world-writable (Unraid appdata convention — the container itself
-creates subfolders as 0777 and files as 0666, so you can still edit them):
+The settings page writes `servers.yaml` into the mounted volume. As root **without** `CAP_DAC_OVERRIDE`, the container can only write into world-writable directories — so make the mounted base directory world-writable once (the container creates subfolders `0777` and files `0666` itself, so you can still edit them):
 
 ```bash
 chmod 777 /mnt/user/appdata/netspy      # Unraid
 chmod 777 /opt/netspy                   # other hosts
 ```
 
-**Why the container runs as root (no alternative):** NetSpy samples the real
-host through the host PID namespace — it reads `/proc` and `ss` of *all*
-processes: socket→process attribution (`/proc/<pid>/fd` + `SYS_PTRACE`),
-disk I/O (`/proc/<pid>/io`) and CPU/RAM (`/proc/<pid>/stat`, VmRSS) of every
-process, including daemons owned by root (e.g. smbd). Reading another
-user's `/proc/<pid>/io` or `/proc/<pid>/stat` requires root. Running as
-PUID/PGID 99:100 (like most Unraid containers) would silently produce empty
-process lists, so root is not a configuration choice — it is required for
-the measurements to work at all.
+> ⚠️ **Do NOT add `--cap-add=DAC_OVERRIDE`** to fix this — that capability lets the root container bypass **all** file permission checks, including on every other mounted directory. Fix the folder permissions instead.
 
-> ⚠️ **Do NOT add `--cap-add=DAC_OVERRIDE` just to make the config writable.**
-> That capability lets the (root) container bypass **all** file permission
-> checks — including on every other directory mounted into it. Fix the folder
-> permissions on the host instead; the container takes care of its own
-> subfolder/file permissions.
+---
 
-**Logs:** the token is only compared against the request header; it is never
-written to logs or responses.
+## How it works (short)
 
-**Disclaimer:** this software is provided "as is", without warranty of any
-kind, express or implied. The author is not liable for any damages or losses
-arising from its use. Use at your own risk.
+- **Interface rates:** `/proc/net/dev` deltas; "total traffic" = the interface(s) with the default route (auto-detected — br0 on Unraid, eth0/bond0 elsewhere).
+- **Per-process rates:** `ss -tinpe` per socket inode, deltas aggregated by process, capped at the physical link rate (no impossible artifacts). UDP and kernel traffic (nfsd/kworker) land in the row "**not assigned (kernel/UDP)**".
+- **Per-container rates:** bridge containers get their own rows (veth sums → container name). Host-network containers (e.g. `binhex-*`) share the host netns and deliberately get **no badge** (indistinguishable from host processes).
+- **Disk I/O:** `/proc/<pid>/io` deltas — storage-layer bytes incl. network filesystems, EMA-smoothed.
+- **History:** 1 h ring buffer in the web container's memory (no DB).
 
-## Deploy on Unraid (Community Apps GUI)
-
-Install over the **Unraid GUI** — no shell access needed:
-
-1. **Apps → Settings** (gear icon) → **Template Repositories** → add
-   `https://github.com/thefirstmojo/netspy` (once listed in the Community
-   App Store, NetSpy shows up in Apps directly — no repository needed).
-2. **Apps → NetSpy → Install**.
-3. Set the fields in the GUI:
-   - `SERVERS` — e.g. `Unraid=local` (add agents with
-     `;TrueNAS=http://10.10.10.20:8091`)
-   - `AGENT_TOKEN` — a long random value (masked field)
-   - Ports, `UPLINK` (empty = auto) and the Docker socket mount come with
-     sensible defaults and rarely need changes.
-4. Open the dashboard via the **WebUI** button.
-
-All variables are editable later under **Docker → NetSpy → edit**. The
-`docker-compose.yml` in this repo remains the distribution channel for hosts
-**without** the Unraid GUI (agents on TrueNAS/Debian via Portainer) — see next
-section.
-
-## Deploy on another host as agent (TrueNAS via Portainer, Debian, …)
-
-1. **Portainer** → Stacks → **Add stack** (or use docker compose directly)
-2. Paste/edit `docker-compose.yml`:
-   - `ROLE: agent`
-   - `SERVERS: ""` (empty — the agent is polled by the web instance)
-   - `UPLINK: "eth0"` (or whatever the host's uplink is)
-   - `AGENT_TOKEN: "<same token as the web instance>"`
-   - **TrueNAS:** uncomment the `security_opt: [apparmor:unconfined]` block —
-     TrueNAS enforces the `docker-default` AppArmor profile on all containers,
-     which blocks the `/proc/<pid>/fd` reads that `ss` needs for process
-     attribution. This is the minimal relaxation (no `privileged` needed).
-   - Debian: only needed if AppArmor is active on that host.
-3. Deploy → test: `curl http://10.10.10.20:8091/api/metrics` (with the
-   `X-Agent-Token` header)
-
-> **Version pinning:** Portainer caches images. Pin the tag
-> (`image: ghcr.io/thefirstmojo/netspy:v0.3.22`) for deterministic updates —
-> a new tag always forces a fresh pull. With `:latest`, tick **"Pull latest
-> image"** when updating the stack, otherwise the old image keeps running.
+**Known limits:** TCP only per process (UDP/kernel → "not assigned") · 1 s sampling averages short bursts.
 
 ## Local build (development only)
 
-The **prebuilt GHCR image** is the default (`ghcr.io/thefirstmojo/netspy:latest`,
-built automatically on every `git tag vX.Y && git push --tags`). To build
-locally:
-
 ```bash
-docker build -t netspy:latest .
-# change the image line in docker-compose.yml to: image: netspy:latest
-docker compose up -d
+docker build -t netspy:latest .   # then use image: netspy:latest in the compose
 ```
 
-## How it works
+## Planned
 
-- **Interface rates:** `/proc/net/dev` (cumulative counters, delta per second).
-  The "total traffic" is the interface(s) with the **default route** — detected
-  automatically (br0 on Unraid, eth0/enpXsY on Debian, bond0 with bonding), so
-  nothing needs to be configured. `UPLINK` is an optional override for special
-  setups (multiple WAN links, policy routing).
-- **Per-process rates (TCP):** `ss -tinpe` (inet_diag) yields cumulative byte
-  counters per socket incl. PID and socket inode. Deltas are tracked **per
-  socket inode** (immune to fork/handover spikes, e.g. smbd parent/child) and
-  aggregated by process name. Rates are capped at the host's physical link
-  rate, so impossible artifacts are filtered out.
-- **Per-container rates:** with the read-only Docker socket mounted, bridge
-  containers get their own rows (veth sums → container name, e.g. `stash`).
-- **Unattributed:** UDP, kernel threads (nfsd/kworker), short-lived connections
-  → row "- not assigned (kernel/UDP) -".
-- **Disk I/O per process (Disk tab):** `/proc/<pid>/io` (read_bytes/write_bytes,
-  cumulative) yields the real storage-layer bytes per process — including
-  network filesystems like CIFS/NFS, so SMB transfers show up on the reader.
-  Deltas are EMA-smoothed with activity decay, exactly like the network rows.
-- **History:** 1 h ring buffer in the web container's memory (no DB needed).
-- **Note on bridge containers:** processes *inside* a bridge container live in
-  their own network namespace and are not visible from the host — their
-  traffic appears as a per-container row instead. Kernel-level SMB/NFS mounts
-  (cifs client) are likewise kernel-driven and land in the "not assigned" row.
-- **Host-network containers** (e.g. `binhex-*` with host networking) share the
-  host netns — their processes are indistinguishable from host processes and
-  get **no container badge** (deliberate, avoids false attribution).
-
-## Unraid (Community Applications)
-
-A CA template lives in [`templates/`](templates/netspy.xml): it installs the
-web role with all settings editable in the Unraid Docker GUI (ROLE, SERVERS,
-UPLINK, ports, token, Docker socket). To try it: Apps → Settings → Template
-Repositories → add `https://github.com/thefirstmojo/netspy`. No GHCR login
-needed — the image pulls anonymously. See
-[templates/README.md](templates/README.md).
-
-## Configuration
-
-All values are set **directly in `docker-compose.yml`** (no `.env` file):
-
-| Key (environment) | Default | Description |
-|---|---|---|
-| `ROLE` | `web` | `web` or `agent` |
-| `SERVERS` | `Main=local` | `Name=local;Name=http://host:8091` |
-| `UPLINK` | auto (default route) | Comma-separated override, e.g. `br0,bond0` |
-| `WEB_PORT` | `8090` | Host port of the web UI (host networking — the value IS the external port) |
-| `AGENT_PORT` | `8091` | Host port of the agent API (same) |
-| `AGENT_TOKEN` | empty | Header `X-Agent-Token` (must match on all hosts) |
-| `DOCKER_SOCK` | `/var/run/docker.sock` (web) | Docker socket for container rows; `""` disables |
-| `CONFIG_DIR` | auto: `/netspy/config` (web) | Writable volume for `servers.yaml` (settings UI, human-editable YAML). Auto-detected: `/netspy` mount → `/netspy/config`; old `/config` mounts keep working. Without a volume the `SERVERS` env is used as fallback |
-
-Plus two commented option blocks in the compose, enabled per host:
-- **AppArmor** (`security_opt: [apparmor:unconfined]`) — hosts that enforce an
-  AppArmor container profile (TrueNAS, Debian with AppArmor)
-- **Docker socket volume** — hosts with a Docker socket, for per-container rows
-
-## Known limits (by design)
-
-- **TCP only per process:** UDP (DNS, QUIC/streaming) and kernel traffic
-  (nfsd/kworker) land in the "not assigned" row.
-- **1 s sampling:** short bursts are averaged.
-
-## Self-test
-
-```bash
-python3 app/agent.py --selftest   # parse_ss parser vs fixture
-```
-
-## Roadmap
-
-- SQLite/InfluxDB instead of ring buffer (history across reboots)
-- Per-container view (veth → container) as its own section
+- Persistent history (SQLite/InfluxDB) across restarts
 - Threshold alerts (email/Telegram)
+
+---
+
+*Provided "as is", without warranty of any kind. Use at your own risk.*
