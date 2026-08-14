@@ -30,6 +30,7 @@ Real-time monitoring of your servers in one dashboard: **per-interface, per-proc
 
 ### 🛠️ Settings page
 - Add/remove servers in the UI — stored as human-editable `servers.yaml`
+- `SERVERS` env entries stay in the env: each row is marked with its origin (env/config) and saving writes only the config rows (edit an env row to move it to the config)
 - Works without a volume too (env fallback); the UI explains what to mount
 
 ![Disk I/O tab](docs/screenshots/disk-tab.png)

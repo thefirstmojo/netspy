@@ -903,10 +903,11 @@ function renderSettings() {
     ? `<span class="srcbadge src-file" title="Server list is read from the config file">📄 config file</span>`
     : `<span class="srcbadge src-env" title="Server list is read from the SERVERS environment variable">⚙️ env (SERVERS)</span>`;
   const rows = (settingsData.servers || []).map((s, i) =>
-    `<div class="sett-row" data-i="${i}">
+    `<div class="sett-row" data-origin="${s.origin || "config"}" data-original="${esc(s.name)}|${esc(s.url || "local")}">
+       <span class="origin ${s.origin === "env" ? "o-env" : "o-config"}">${s.origin === "env" ? "env" : "config"}</span>
        <input class="sett-name" placeholder="Name (e.g. Unraid)" value="${esc(s.name)}">
        <input class="sett-url" placeholder="URL, 'local' or empty (=local)" value="${esc(s.url || "local")}">
-       <button class="sett-del" title="Remove">✕</button>
+       ${s.origin === "env" ? "" : `<button class="sett-del" title="Remove">✕</button>`}
      </div>`).join("");
   box.innerHTML =
     srcBadge +
@@ -924,24 +925,49 @@ function renderSettings() {
     const list = document.getElementById("settlist");
     const div = document.createElement("div");
     div.className = "sett-row";
-    div.innerHTML = `<input class="sett-name" placeholder="Name (z.B. Unraid)">` +
-      `<input class="sett-url" placeholder="URL oder 'local'">` +
-      `<button class="sett-del" title="Entfernen">✕</button>`;
+    div.dataset.origin = "config";
+    div.innerHTML = `<span class="origin o-config">config</span>` +
+      `<input class="sett-name" placeholder="Name (e.g. Unraid)">` +
+      `<input class="sett-url" placeholder="URL, 'local' or empty">` +
+      `<button class="sett-del" title="Remove">✕</button>`;
     div.querySelector(".sett-del").addEventListener("click", () => div.remove());
     list.appendChild(div);
   });
   box.querySelectorAll(".sett-del").forEach(b =>
     b.addEventListener("click", e => e.target.closest(".sett-row").remove()));
+  // Env-Zeile wird zur config-Zeile, sobald der User sie aendert (bewusste Uebernahme)
+  box.querySelectorAll(".sett-row[data-origin='env'] input").forEach(inp => {
+    inp.addEventListener("input", () => {
+      const row = inp.closest(".sett-row");
+      if (row.dataset.origin !== "env") return;
+      row.dataset.origin = "config";
+      const lbl = row.querySelector(".origin");
+      if (lbl) { lbl.className = "origin o-config"; lbl.textContent = "config"; }
+      if (!row.querySelector(".sett-del")) {
+        const del = document.createElement("button");
+        del.className = "sett-del"; del.title = "Remove"; del.textContent = "✕";
+        del.addEventListener("click", () => row.remove());
+        row.appendChild(del);
+      }
+    });
+  });
   box.querySelector("#sett-save").addEventListener("click", saveSettings);
 }
 
 async function saveSettings() {
   const list = document.getElementById("settlist");
   const servers = [];
+  let skippedEnv = 0;
   for (const row of list.querySelectorAll(".sett-row")) {
+    const origin = row.dataset.origin || "config";
     const name = row.querySelector(".sett-name").value.trim();
     const url = row.querySelector(".sett-url").value.trim();
     if (!name) continue;
+    if (origin === "env") {
+      // Unveraenderte Env-Zeile: NICHT in die Config importieren
+      const original = row.dataset.original || "";
+      if (original === name + "|" + url) { skippedEnv++; continue; }
+    }
     servers.push({
       name,
       url: (url === "" || url.toLowerCase() === "local") ? null : url,
@@ -949,7 +975,9 @@ async function saveSettings() {
   }
   const status = document.getElementById("sett-status");
   if (!servers.length) {
-    settingsStatus = "No valid servers (name required).";
+    settingsStatus = skippedEnv
+      ? "Nothing to save — env servers are not imported (edit a row to move it to the config)."
+      : "No valid servers (name required).";
     status.textContent = settingsStatus;
     return;
   }

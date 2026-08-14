@@ -120,11 +120,9 @@ def _read_file(path: str):
         return None
 
 
-def load_servers(env_servers: str, config_dir: str) -> list:
-    """servers.yaml gewinnt, dann servers.json (Legacy-Migration),
-    sonst Env-Fallback. Ohne jede Angabe wird ein lokaler Server
-    ('Main=local') ergaenzt, damit das Dashboard immer starten kann."""
-    # 1) servers.yaml (menscheneditierbar, neu ab v0.5.1)
+def _config_servers_list(config_dir: str) -> list:
+    """Valide Server aus der Config-Datei (yaml -> json Legacy) oder [].
+    Ohne Env-Fallback — die Env-Server werden separat gehalten."""
     txt = _read_file(config_path(config_dir))
     if txt is not None:
         try:
@@ -134,7 +132,6 @@ def load_servers(env_servers: str, config_dir: str) -> list:
                 return v
         except Exception:
             pass
-    # 2) servers.json (v0.5.0) — Migration
     txt = _read_file(config_legacy_path(config_dir))
     if txt is not None:
         try:
@@ -143,11 +140,31 @@ def load_servers(env_servers: str, config_dir: str) -> list:
                 return v
         except Exception:
             pass
-    # 3) Env-Fallback; leer/nicht gesetzt -> lokalen Server ergaenzen
-    v = parse_servers(env_servers)
-    if not v:
-        v = [{"name": "Main", "url": None}]
-    return v
+    return []
+
+
+def merge_servers(env_servers: list, config_servers: list) -> list:
+    """Env-Server (Basis) + Config-Server (ergaenzen/ueberschreiben).
+
+    Bei Namensgleichheit gewinnt der Config-Eintrag. Ist beides leer,
+    wird ein lokaler Server ('Main=local') ergaenzt, damit das Dashboard
+    immer starten kann."""
+    merged: list = []
+    names: set = set()
+    for s in list(config_servers) + list(env_servers):
+        if s["name"] in names:
+            continue
+        names.add(s["name"])
+        merged.append(s)
+    if not merged:
+        merged = [{"name": "Main", "url": None}]
+    return merged
+
+
+def load_servers(env_servers: str, config_dir: str) -> list:
+    """Kombinierte Server-Liste: Config-Datei gewinnt, Env ergaenzt.
+    Ohne jede Angabe wird ein lokaler Server ('Main=local') ergaenzt."""
+    return merge_servers(parse_servers(env_servers), _config_servers_list(config_dir))
 
 
 def save_servers(servers: list, config_dir: str) -> str:
@@ -181,10 +198,15 @@ class Monitor:
     """Pollt alle Server (1/s), haelt History + letzte Snapshots."""
 
     def __init__(self, servers: list, uplink: str = "", docker_sock: str = "",
-                 token: str = "", config_dir: str = "/data"):
+                 token: str = "", config_dir: str = "/data",
+                 env_servers: list | None = None,
+                 config_servers: list | None = None):
         self.servers = servers
         self.token = token
         self.config_dir = config_dir
+        # Herkunft getrennt halten: Env-Server (Basis) + Config-Datei-Server
+        self.env_servers: list = env_servers if env_servers is not None else list(servers)
+        self.config_servers: list = config_servers if config_servers is not None else []
         self._uplink = uplink
         self._docker_sock = docker_sock
         self.lock = threading.Lock()
@@ -497,6 +519,14 @@ class WebHandler(BaseHTTPRequestHandler):
                 dev_cfg = os.stat(mon.config_dir).st_dev
             except OSError:
                 pass
+            # Herkunft pro Server: config-Zeilen zuerst, dann env (Dedupe)
+            cfg_names = {s["name"] for s in mon.config_servers}
+            servers_out = (
+                [{"name": s["name"], "url": s.get("url"), "origin": "config"}
+                 for s in mon.config_servers]
+                + [{"name": s["name"], "url": s.get("url"), "origin": "env"}
+                   for s in mon.env_servers if s["name"] not in cfg_names]
+            )
             body = json.dumps({
                 "path": cfg_path,
                 "writable": writable,
@@ -504,10 +534,7 @@ class WebHandler(BaseHTTPRequestHandler):
                 "has_template": has_template,
                 "diag": {"dev_root": dev_root, "dev_cfg": dev_cfg,
                          "mounted": dev_cfg is not None and dev_cfg != dev_root},
-                "servers": [
-                    {"name": s["name"], "url": s.get("url")}
-                    for s in mon.servers
-                ],
+                "servers": servers_out,
             }).encode()
             self._send_bytes(200, body, "application/json")
             return
@@ -584,7 +611,10 @@ class WebHandler(BaseHTTPRequestHandler):
                 return
             try:
                 path = save_servers(cleaned, mon.config_dir)
-                mon.set_servers(cleaned)
+                # Env-Server bleiben unveraendert; die Datei enthaelt nur die
+                # uebermittelten (config-)Zeilen
+                mon.config_servers = cleaned
+                mon.set_servers(merge_servers(mon.env_servers, cleaned))
             except OSError as e:
                 self._send_bytes(500, json.dumps({
                     "error": f"save failed: {e}",
@@ -694,7 +724,9 @@ def _config_source(config_dir: str) -> str:
 
 def main() -> None:
     config_dir = resolve_config_dir(os.environ.get("CONFIG_DIR", ""))
-    servers = load_servers(os.environ.get("SERVERS", ""), config_dir)
+    env_servers = parse_servers(os.environ.get("SERVERS", ""))
+    config_servers = _config_servers_list(config_dir)
+    servers = merge_servers(env_servers, config_servers)
     token = os.environ.get("AGENT_TOKEN", "")
     mon = Monitor(
         servers,
@@ -702,6 +734,8 @@ def main() -> None:
         docker_sock=os.environ.get("DOCKER_SOCK", "/var/run/docker.sock"),
         token=token,
         config_dir=config_dir,
+        env_servers=env_servers,
+        config_servers=config_servers,
     )
     # Beim Start: leere servers.yaml-Vorlage anlegen (nur bei gemountetem
     # Volume) — sichtbarer Beweis auf dem Host, dass der Pfad korrekt ist.
