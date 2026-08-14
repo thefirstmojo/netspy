@@ -989,7 +989,9 @@ async function saveSettings() {
     });
     const d = await r.json().catch(() => ({}));
     if (r.ok) {
-      settingsStatus = "✅ Saved (" + servers.length + " servers) → " + (d.path || "servers.yaml");
+      settingsStatus = servers.length
+        ? "✅ Saved (" + servers.length + " servers) → " + (d.path || "servers.yaml")
+        : "✅ Config cleared — dashboard falls back to the local server.";
       settingsError = "";
       loadSettings();
     } else if (r.status === 409 && d.hint) {

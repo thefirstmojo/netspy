@@ -620,6 +620,11 @@ class WebHandler(BaseHTTPRequestHandler):
                     "hint": "Volume nicht schreibbar? Siehe /api/settings.",
                 }).encode(), "application/json")
                 return
+            except Exception as e:  # noqa: BLE001 - defensiv: nie den Handler-Thread killen
+                self._send_bytes(500, json.dumps({
+                    "error": f"apply failed: {e}",
+                }).encode(), "application/json")
+                return
             self._send_bytes(200, json.dumps({"ok": True, "path": path}).encode(),
                              "application/json")
             return
