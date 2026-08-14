@@ -115,6 +115,26 @@ agent simply marks it offline; the other hosts keep working.
 - On TrueNAS, `security_opt: [apparmor:unconfined]` is the minimal relaxation
   (AppArmor profile only) instead of `privileged: true`.
 
+**Config volume write access (v0.5+):**
+
+The settings page writes `servers.yaml` into the mounted config directory.
+Because the container runs as root with `cap_drop: [ALL]` (no
+`CAP_DAC_OVERRIDE`), it can only write into directories that are
+world-writable or owned by uid 0. **Recommended:** make the mounted base
+directory world-writable (Unraid appdata convention — the container itself
+creates subfolders as 0777 and files as 0666, so you can still edit them):
+
+```bash
+chmod 777 /mnt/user/appdata/netspy      # Unraid
+chmod 777 /opt/netspy                   # other hosts
+```
+
+> ⚠️ **Do NOT add `--cap-add=DAC_OVERRIDE` just to make the config writable.**
+> That capability lets the (root) container bypass **all** file permission
+> checks — including on every other directory mounted into it. Fix the folder
+> permissions on the host instead; the container takes care of its own
+> subfolder/file permissions.
+
 **Logs:** the token is only compared against the request header; it is never
 written to logs or responses.
 
