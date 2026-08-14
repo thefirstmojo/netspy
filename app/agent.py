@@ -198,7 +198,8 @@ class Sampler:
         # Disk-I/O pro Prozess (/proc/<pid>/io)
         self._disk_prev: dict = {}   # pid -> (read_bytes, write_bytes) kumulativ
         self._disk_ema: dict = {}    # name -> {"read": float, "write": float}
-        self._disk_active: dict = {} # name -> monotonic timestamp
+        self._disk_ring: dict = {}   # name -> deque(maxlen=10) Roh-Raten (r, w)
+        self._disk_active: dict = {}  # name -> monotonic timestamp
         self._disk_cont: dict = {}   # name -> container (persistent, kein Flackern)
 
         # CPU/RAM pro Prozess (/proc/stat + /proc/<pid>/stat)
@@ -340,11 +341,17 @@ class Sampler:
                 e = disk_raw.setdefault(name, [0.0, 0.0])
                 e[0] += dr
                 e[1] += dw
+                # 10-s-Rolling-Mittel (Rohwerte pro Tick, gleitendes Fenster)
+                self._disk_ring.setdefault(name, deque(maxlen=10)).append((dr, dw))
                 ns = self.netns_of(pid)
                 if ns:
                     cname = self._containers.get(ns)
                     if cname:
                         self._disk_cont.setdefault(name, cname)
+        # Ringe inaktiver Namen mit 0 füttern (sonst blieben alte Werte stehen)
+        for name in list(self._disk_ring):
+            if name not in disk_raw:
+                self._disk_ring[name].append((0.0, 0.0))
         # Nur lebende PIDs behalten (Speicherbegrenzung)
         self._disk_prev = disk_now
 
@@ -368,13 +375,23 @@ class Sampler:
             if name not in disk_raw:
                 ema = {"read": ema["read"] * (1 - EMA),
                        "write": ema["write"] * (1 - EMA)}
-            emitted[name] = ema
+            # 10-s-Rolling-Mittel aus dem Ring
+            ring = self._disk_ring.get(name)
+            if ring:
+                n = len(ring)
+                r10 = sum(x[0] for x in ring) / n
+                w10 = sum(x[1] for x in ring) / n
+            else:
+                r10 = w10 = 0.0
+            emitted[name] = {**ema, "read10": r10, "write10": w10}
         self._disk_ema = {k: v for k, v in self._disk_ema.items() if k in emitted}
         self._disk_active = {k: v for k, v in self._disk_active.items() if k in emitted}
         self._disk_cont = {k: v for k, v in self._disk_cont.items() if k in emitted}
+        self._disk_ring = {k: v for k, v in self._disk_ring.items() if k in emitted}
 
         out = [
             {"name": n, "read": round(v["read"], 1), "write": round(v["write"], 1),
+             "read10": round(v["read10"], 1), "write10": round(v["write10"], 1),
              "container": self._disk_cont.get(n)}
             for n, v in emitted.items() if v["read"] + v["write"] > 0.5
         ]

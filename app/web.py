@@ -379,7 +379,9 @@ class Monitor:
                     continue
                 for p in snap.get("disk", []):
                     row = dtable.setdefault(p["name"], {"hosts": {}})
-                    row["hosts"][name] = {"read": p["read"], "write": p["write"]}
+                    row["hosts"][name] = {"read": p["read"], "write": p["write"],
+                                          "read10": p.get("read10", 0.0),
+                                          "write10": p.get("write10", 0.0)}
                     if p.get("container"):
                         row.setdefault("container", p["container"])
 

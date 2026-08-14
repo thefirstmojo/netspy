@@ -7,6 +7,7 @@ const state = {
   diskSortKey: "total", diskSortDir: -1, lastDisk: [],
   sysSortKey: "cpu", sysSortDir: -1, lastSys: [], lastHostSys: {},
   cpuMode: "live",  // "live" (EMA) | "avg10" (10 s rolling average)
+  diskMode: "live",  // dito fuer Disk I/O
   lastServers: [],
   latencyCharts: {}, lastLatency: {},
   equalScale: false, lastSeries: null,
@@ -569,11 +570,13 @@ function renderDiskTable(table, servers) {
   rows.sort((a, b) => {
     let av, bv;
     const ha = a.r.hosts[a.sname] || {}, hb = b.r.hosts[b.sname] || {};
+    const rd = h => (state.diskMode === "avg10" ? (h.read10 ?? h.read) : h.read) || 0;
+    const wr = h => (state.diskMode === "avg10" ? (h.write10 ?? h.write) : h.write) || 0;
     if (state.diskSortKey === "name") { av = a.r.name.toLowerCase(); bv = b.r.name.toLowerCase(); }
     else if (state.diskSortKey === "server") { av = a.sname.toLowerCase(); bv = b.sname.toLowerCase(); }
-    else if (state.diskSortKey === "read") { av = ha.read || 0; bv = hb.read || 0; }
-    else if (state.diskSortKey === "write") { av = ha.write || 0; bv = hb.write || 0; }
-    else { av = (ha.read || 0) + (ha.write || 0); bv = (hb.read || 0) + (hb.write || 0); }
+    else if (state.diskSortKey === "read") { av = rd(ha); bv = rd(hb); }
+    else if (state.diskSortKey === "write") { av = wr(ha); bv = wr(hb); }
+    else { av = rd(ha) + wr(ha); bv = rd(hb) + wr(hb); }
     if (av < bv) return -state.diskSortDir;
     if (av > bv) return state.diskSortDir;
     return 0;
@@ -583,11 +586,13 @@ function renderDiskTable(table, servers) {
     let badge = "";
     if (r.container) badge = `<span class="cont">${esc(r.container)}</span>`;
     const h = r.hosts[sname] || {};
+    const rd = state.diskMode === "avg10" ? (h.read10 ?? h.read) : h.read;
+    const wr = state.diskMode === "avg10" ? (h.write10 ?? h.write) : h.write;
     return `<tr data-server="${esc(sname)}" data-proc="${esc(r.name)}">` +
       `<td class="pname">${esc(r.name)}${badge}</td>` +
       `<td class="srv">${esc(sname)}</td>` +
-      `<td class="num rx">${h.read == null ? "–" : fmt(h.read)}</td>` +
-      `<td class="num tx">${h.write == null ? "–" : fmt(h.write)}</td></tr>`;
+      `<td class="num rx">${rd == null ? "–" : fmt(rd)}</td>` +
+      `<td class="num tx">${wr == null ? "–" : fmt(wr)}</td></tr>`;
   }).join("");
 }
 
@@ -826,6 +831,17 @@ function setCpuMode(mode) {
 }
 document.getElementById("cpumode-live").addEventListener("click", () => setCpuMode("live"));
 document.getElementById("cpumode-avg10").addEventListener("click", () => setCpuMode("avg10"));
+
+function setDiskMode(mode) {
+  state.diskMode = mode;
+  const live = document.getElementById("diskmode-live");
+  const avg = document.getElementById("diskmode-avg10");
+  if (live) live.classList.toggle("active", mode === "live");
+  if (avg) avg.classList.toggle("active", mode === "avg10");
+  renderDiskTable(state.lastDisk, state.lastServers);
+}
+document.getElementById("diskmode-live").addEventListener("click", () => setDiskMode("live"));
+document.getElementById("diskmode-avg10").addEventListener("click", () => setDiskMode("avg10"));
 
 /* Tab-Umschaltung: Network / Disk / CPU-RAM / Settings */
 document.getElementById("tabbtn-net").addEventListener("click", () => setTab("net"));

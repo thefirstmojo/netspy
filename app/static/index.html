@@ -49,7 +49,11 @@
 
   <section id="panel-disk" class="tabpanel hidden">
     <details class="card" open>
-      <summary>Disk I/O by process <span class="hint">(read/write per second, click a column header to sort)</span></summary>
+      <summary>Disk I/O by process <span class="hint">(read/write per second, click a column header to sort)</span>
+        <span class="cpumode" title="Disk display mode">
+          <button id="diskmode-live" class="chip-btn active" title="Live values (EMA-smoothed)">⚡ live</button>
+          <button id="diskmode-avg10" class="chip-btn" title="10 s rolling average">📊 10 s avg</button>
+        </span></summary>
       <div class="tablewrap">
         <table id="disktable">
           <thead id="diskthead"></thead>
