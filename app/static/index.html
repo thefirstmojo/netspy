@@ -23,6 +23,8 @@
     <div id="tabs" class="tabs" role="tablist">
       <button id="tabbtn-net" class="tabbtn active" role="tab" aria-selected="true">🌐 Netzwerk</button>
       <button id="tabbtn-disk" class="tabbtn" role="tab" aria-selected="false">💾 Disk I/O</button>
+      <button id="tabbtn-sys" class="tabbtn" role="tab" aria-selected="false">⚙️ CPU/RAM</button>
+      <button id="tabbtn-settings" class="tabbtn" role="tab" aria-selected="false">🛠️ Settings</button>
     </div>
     <button id="scalebtn" class="scalebtn" title="Force the same Y-axis scale on all charts (for direct comparison)">⚖ Equal scale</button>
   </div>
@@ -56,6 +58,27 @@
       </div>
     </details>
     <p class="hint" style="margin:8px 4px">Wer belastet gerade die Festplatte(n)? read/write sind die tatsächlichen Bytes von/auf die Storage-Schicht (inkl. CIFS/NFS-Mounts) pro Sekunde.</p>
+  </section>
+
+  <section id="panel-sys" class="tabpanel hidden">
+    <details class="card" open>
+      <summary>CPU / RAM by process <span class="hint">(click a column header to sort)</span></summary>
+      <div id="syshosts" class="syshosts"></div>
+      <div class="tablewrap">
+        <table id="systable">
+          <thead id="systhead"></thead>
+          <tbody id="systbody"></tbody>
+        </table>
+      </div>
+    </details>
+    <p class="hint" style="margin:8px 4px">CPU% = Anteil an der Gesamt-CPU-Zeit des Hosts (alle Kerne zusammen = 100%), RAM = resident memory (VmRSS). Werte sind geglättet.</p>
+  </section>
+
+  <section id="panel-settings" class="tabpanel hidden">
+    <details class="card" open>
+      <summary>Server settings</summary>
+      <div id="settingsbox" class="settingsbox"></div>
+    </details>
   </section>
 
   <footer>NetSpy · Sampling 1 s · History 1 h (in memory)</footer>

@@ -5,6 +5,8 @@ const state = {
   sortKey: "name", sortDir: 1, servers: [], charts: {},
   ifaceSort: {}, lastIfaces: null, lastTable: [], visible: {},
   diskSortKey: "total", diskSortDir: -1, lastDisk: [],
+  sysSortKey: "cpu", sysSortDir: -1, lastSys: [], lastHostSys: {},
+  latencyCharts: {}, lastLatency: {},
   equalScale: false, lastSeries: null,
   detailProcs: {}, detailCharts: {},   // server -> {proc, chart}
   procHistory: {},                     // server -> [{ts, procs:[[name,cont,rx,tx],...]}]
@@ -133,7 +135,9 @@ function buildCharts(servers) {
       `<div class="chartwrap"><canvas></canvas></div>` +
       `<div class="chartlegend">` +
       `<span class="lg rx">▼ in ${fmt(0)}</span>` +
-      `<span class="lg tx">▲ out ${fmt(0)}</span></div>`;
+      `<span class="lg tx">▲ out ${fmt(0)}</span>` +
+      `<span class="lg lat-title">Latenz</span></div>` +
+      `<div class="chartwrap latwrap"><canvas id="lat-${esc(s.name).replace(/[^a-zA-Z0-9]/g, "_")}"></canvas></div>`;
     grid.appendChild(card);
   }
 
@@ -164,6 +168,30 @@ function buildCharts(servers) {
       },
     });
     state.charts[s.name] = ch;
+    /* Latenz-Chart (Poll-Antwortzeit, 5 min Ring-Buffer) */
+    const lc = grid.querySelector("#chart-" + s.name.replace(/[^a-zA-Z0-9]/g, "_") + " .latwrap canvas");
+    const lch = new Chart(lc, {
+      type: "line",
+      data: {
+        labels: [],
+        datasets: [{
+          label: "ms", data: [], borderColor: "#a78bfa",
+          backgroundColor: "rgba(167,139,250,.12)", fill: true,
+          tension: .3, pointRadius: 0, borderWidth: 1.5,
+          spanGaps: true,
+        }],
+      },
+      options: {
+        animation: false, responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: true } },
+        scales: {
+          x: { ticks: { color: "#64748b", maxTicksLimit: 4, maxRotation: 0 }, grid: { color: "rgba(255,255,255,.05)" } },
+          y: { ticks: { color: "#64748b", callback: v => v + " ms" }, grid: { color: "rgba(255,255,255,.05)" }, beginAtZero: true },
+        },
+        interaction: { intersect: false, mode: "index" },
+      },
+    });
+    state.latencyCharts[s.name] = lch;
     /* Eigener Tooltip: friert bei Hover die Daten ein, verankert an der Maus */
     canvas.addEventListener("mousemove", e => {
       const rect = canvas.getBoundingClientRect();
@@ -464,6 +492,7 @@ function buildTableHeader(servers) {
     `<th data-key="server" class="${cls("server")}">Server</th>` +
     `<th data-key="rx" class="sortable num ${state.sortKey === "rx" ? "active" + (state.sortDir < 0 ? " sort-desc" : "") : ""}">in</th>` +
     `<th data-key="tx" class="sortable num ${state.sortKey === "tx" ? "active" + (state.sortDir < 0 ? " sort-desc" : "") : ""}">out</th>` +
+    `<th data-key="conn" class="sortable num ${state.sortKey === "conn" ? "active" + (state.sortDir < 0 ? " sort-desc" : "") : ""}" title="aktive TCP-Verbindungen">conn</th>` +
     `</tr>`;
 }
 
@@ -483,6 +512,7 @@ function renderTable(table, servers) {
     else if (state.sortKey === "server") { av = a.sname.toLowerCase(); bv = b.sname.toLowerCase(); }
     else if (state.sortKey === "rx") { av = ha.rx || 0; bv = hb.rx || 0; }
     else if (state.sortKey === "tx") { av = ha.tx || 0; bv = hb.tx || 0; }
+    else if (state.sortKey === "conn") { av = ha.conns || 0; bv = hb.conns || 0; }
     else { av = (ha.rx || 0) + (ha.tx || 0); bv = (hb.rx || 0) + (hb.tx || 0); }
     if (av < bv) return -state.sortDir;
     if (av > bv) return state.sortDir;
@@ -499,7 +529,8 @@ function renderTable(table, servers) {
       `<td class="pname${isRest ? " rest" : ""}">${esc(r.name)}${badge}</td>` +
       `<td class="srv">${esc(sname)}</td>` +
       `<td class="num rx">${h.rx == null ? "–" : fmt(h.rx)}</td>` +
-      `<td class="num tx">${h.tx == null ? "–" : fmt(h.tx)}</td></tr>`;
+      `<td class="num tx">${h.tx == null ? "–" : fmt(h.tx)}</td>` +
+      `<td class="num conn">${h.conns == null ? "–" : h.conns}</td></tr>`;
   }).join("");
 }
 
@@ -548,6 +579,93 @@ function renderDiskTable(table, servers) {
       `<td class="num rx">${h.read == null ? "–" : fmt(h.read)}</td>` +
       `<td class="num tx">${h.write == null ? "–" : fmt(h.write)}</td></tr>`;
   }).join("");
+}
+
+/* ---------- CPU/RAM Tabelle: one row per (process x server) ---------- */
+function buildSysHeader(servers) {
+  const thead = document.getElementById("systhead");
+  const cls = k => "sortable" +
+    (state.sysSortKey === k ? " active" + (state.sysSortDir < 0 ? " sort-desc" : "") : "");
+  thead.innerHTML = `<tr>` +
+    `<th data-key="name" class="${cls("name")}">Process</th>` +
+    `<th data-key="server" class="${cls("server")}">Server</th>` +
+    `<th data-key="cpu" class="sortable num ${state.sysSortKey === "cpu" ? "active" + (state.sysSortDir < 0 ? " sort-desc" : "") : ""}">CPU%</th>` +
+    `<th data-key="mem" class="sortable num ${state.sysSortKey === "mem" ? "active" + (state.sysSortDir < 0 ? " sort-desc" : "") : ""}">RAM</th>` +
+    `</tr>`;
+}
+
+function renderSysHosts(host_sys, servers) {
+  const el = document.getElementById("syshosts");
+  if (!el) return;
+  el.innerHTML = servers.map(s => {
+    const h = (host_sys && host_sys[s.name]) || {};
+    const memPct = h.mem_total > 0 ? Math.round(((h.mem_used || 0) / h.mem_total) * 100) : 0;
+    return `<span class="syschip" title="Host gesamt">${esc(s.name)}: ` +
+      `<b style="color:#22d3ee">CPU ${h.cpu == null ? "–" : h.cpu + "%"}</b> · ` +
+      `<b style="color:#a78bfa">RAM ${fmt(h.mem_used || 0)} / ${fmt(h.mem_total || 0)} (${memPct}%)</b></span>`;
+  }).join(" ");
+}
+
+function renderSysTable(table, servers) {
+  const tbody = document.getElementById("systbody");
+  const rows = [];
+  for (const r of table) {
+    for (const sname of Object.keys(r.hosts || {})) {
+      if (!state.visible[sname]) continue;
+      rows.push({ r, sname });
+    }
+  }
+  rows.sort((a, b) => {
+    let av, bv;
+    const ha = a.r.hosts[a.sname] || {}, hb = b.r.hosts[b.sname] || {};
+    if (state.sysSortKey === "name") { av = a.r.name.toLowerCase(); bv = b.r.name.toLowerCase(); }
+    else if (state.sysSortKey === "server") { av = a.sname.toLowerCase(); bv = b.sname.toLowerCase(); }
+    else if (state.sysSortKey === "mem") { av = ha.mem || 0; bv = hb.mem || 0; }
+    else { av = ha.cpu || 0; bv = hb.cpu || 0; }
+    if (av < bv) return -state.sysSortDir;
+    if (av > bv) return state.sysSortDir;
+    return 0;
+  });
+
+  tbody.innerHTML = rows.map(({ r, sname }) => {
+    let badge = "";
+    if (r.container) badge = `<span class="cont">${esc(r.container)}</span>`;
+    const h = r.hosts[sname] || {};
+    return `<tr data-server="${esc(sname)}" data-proc="${esc(r.name)}">` +
+      `<td class="pname">${esc(r.name)}${badge}</td>` +
+      `<td class="srv">${esc(sname)}</td>` +
+      `<td class="num cpu">${h.cpu == null ? "–" : h.cpu.toFixed(1) + " %"}</td>` +
+      `<td class="num mem">${h.mem == null ? "–" : fmt(h.mem)}</td></tr>`;
+  }).join("");
+}
+
+/* ---------- Latenz (Poll-Antwortzeit pro Server) ---------- */
+function updateLatency(latency) {
+  if (!latency) return;
+  for (const sname of Object.keys(latency)) {
+    const ch = state.latencyCharts && state.latencyCharts[sname];
+    if (ch) {
+      const L = latency[sname] || { ts: [], ms: [] };
+      ch.data.labels = (L.ts || []).map(fmtTs);
+      ch.data.datasets[0].data = (L.ms || []).map(v => (v < 0 ? null : v));
+      ch.update("none");
+    }
+    const badge = document.getElementById("badge-" + esc(sname));
+    if (!badge) continue;
+    const arr = (latency[sname] && latency[sname].ms) || [];
+    let last = null;
+    for (let i = arr.length - 1; i >= 0; i--) { if (arr[i] >= 0) { last = arr[i]; break; } }
+    if (last == null) continue;
+    const cls = last < 100 ? "lat-ok" : (last < 500 ? "lat-warn" : "lat-bad");
+    let b = badge.querySelector(".lat");
+    if (!b) {
+      b = document.createElement("span");
+      b.className = "lat";
+      badge.appendChild(b);
+    }
+    b.className = "lat " + cls;
+    b.textContent = " " + last.toFixed(0) + " ms";
+  }
 }
 
 /* ---------- Interfaces (einklappbar, offen-Status + Sortierung bleiben erhalten) ---------- */
@@ -617,12 +735,16 @@ async function refresh() {
     buildCharts(d.servers);
     buildTableHeader(d.servers);
     buildDiskHeader(d.servers);
+    buildSysHeader(d.servers);
     buildServerFilter(d.servers);
   }
   state.version = d.version || state.version;
   state.lastIfaces = d.ifaces;
   state.lastTable = d.table;
   state.lastDisk = d.disk || [];
+  state.lastSys = d.system || [];
+  state.lastHostSys = d.host_sys || {};
+  state.lastLatency = d.latency || {};
   state.lastSeries = d.series;
   /* Prozess-History pro Server (eingefrorene Hover-Werte, synchron zu den Chart-ts) */
   for (const srv of d.servers) {
@@ -642,6 +764,9 @@ async function refresh() {
   updateCharts(d.series);
   renderTable(d.table, d.servers);
   renderDiskTable(d.disk || [], d.servers);
+  renderSysTable(d.system || [], d.servers);
+  renderSysHosts(d.host_sys || {}, d.servers);
+  updateLatency(d.latency);
   updateDetailCharts(d);
   renderIfaces(d.ifaces, d.servers);
 }
@@ -666,26 +791,134 @@ document.getElementById("diskthead").addEventListener("click", e => {
   if (state.lastDisk) renderDiskTable(state.lastDisk, state.servers.map(n => ({ name: n })));
 });
 
-/* Tab-Umschaltung: Netzwerk <-> Disk I/O */
+document.getElementById("systhead").addEventListener("click", e => {
+  const th = e.target.closest("th[data-key]");
+  if (!th) return;
+  const key = th.dataset.key;
+  if (state.sysSortKey === key) state.sysSortDir *= -1;
+  else { state.sysSortKey = key; state.sysSortDir = key === "name" || key === "server" ? 1 : -1; }
+  buildSysHeader(state.servers.map(n => ({ name: n })));
+  if (state.lastSys) renderSysTable(state.lastSys, state.servers.map(n => ({ name: n })));
+});
+
+/* Tab-Umschaltung: Netzwerk / Disk / CPU-RAM / Settings */
 document.getElementById("tabbtn-net").addEventListener("click", () => setTab("net"));
 document.getElementById("tabbtn-disk").addEventListener("click", () => setTab("disk"));
+document.getElementById("tabbtn-sys").addEventListener("click", () => setTab("sys"));
+document.getElementById("tabbtn-settings").addEventListener("click", () => setTab("settings"));
 
+const TAB_IDS = ["net", "disk", "sys", "settings"];
 function setTab(which) {
-  const net = document.getElementById("panel-net");
-  const disk = document.getElementById("panel-disk");
-  const bNet = document.getElementById("tabbtn-net");
-  const bDisk = document.getElementById("tabbtn-disk");
-  const showNet = which === "net";
-  net.classList.toggle("hidden", !showNet);
-  disk.classList.toggle("hidden", showNet);
-  bNet.classList.toggle("active", showNet);
-  bDisk.classList.toggle("active", !showNet);
-  bNet.setAttribute("aria-selected", showNet ? "true" : "false");
-  bDisk.setAttribute("aria-selected", showNet ? "false" : "true");
+  for (const t of TAB_IDS) {
+    document.getElementById("panel-" + t).classList.toggle("hidden", t !== which);
+    document.getElementById("tabbtn-" + t).classList.toggle("active", t === which);
+    document.getElementById("tabbtn-" + t).setAttribute("aria-selected", t === which ? "true" : "false");
+  }
+  if (which === "settings") loadSettings();
   /* Chart-Groessen nach Layout-Wechsel neu berechnen */
   for (const s of Object.keys(state.charts)) {
     const ch = state.charts[s];
     if (ch) setTimeout(() => ch.resize(), 30);
+  }
+  for (const s of Object.keys(state.latencyCharts)) {
+    const ch = state.latencyCharts[s];
+    if (ch) setTimeout(() => ch.resize(), 30);
+  }
+}
+
+/* ---------- Settings (Server-Verwaltung, servers.json mit Volume-Fallback) ---------- */
+let settingsData = null;
+
+async function loadSettings() {
+  try {
+    const r = await fetch("/api/settings");
+    settingsData = await r.json();
+  } catch (e) {
+    settingsData = null;
+  }
+  renderSettings();
+}
+
+function renderSettings() {
+  const box = document.getElementById("settingsbox");
+  if (!box) return;
+  if (!settingsData) {
+    box.innerHTML = `<p class="hint">Einstellungen konnten nicht geladen werden.</p>`;
+    return;
+  }
+  const warn = settingsData.writable ? "" :
+    `<div class="sett-warn">⚠️ <b>Config-Ordner nicht beschreibbar:</b> <code>${esc(settingsData.path)}</code><br>
+      Damit die Einstellungen gespeichert werden können, binde ein Volume ein. In der
+      <code>docker-compose.yml</code> des NetSpy-Web-Containers ergänzen (Beispiel Unraid):<br>
+      <code>&nbsp;&nbsp;volumes:<br>&nbsp;&nbsp;&nbsp;&nbsp;- /mnt/user/appdata/netspy:/data</code><br>
+      Für andere Systeme z. B. <code>- /opt/netspy-data:/data</code>. Danach Container neu
+      erstellen (<code>docker compose up -d</code> bzw. Stack neu deployen).<br>
+      Ohne Volume bleibt die Konfiguration über die <code>SERVERS</code>-Umgebungsvariable aktiv (Fallback).</div>`;
+  const src = settingsData.source === "file"
+    ? "servers.json (Datei)"
+    : "SERVERS-Umgebungsvariable (Fallback)";
+  const rows = (settingsData.servers || []).map((s, i) =>
+    `<div class="sett-row" data-i="${i}">
+       <input class="sett-name" placeholder="Name (z.B. Unraid)" value="${esc(s.name)}">
+       <input class="sett-url" placeholder="URL oder 'local' (z.B. http://10.10.10.20:8091)" value="${esc(s.url || "")}">
+       <button class="sett-del" title="Entfernen">✕</button>
+     </div>`).join("");
+  box.innerHTML =
+    warn +
+    `<p class="hint">Quelle: <b>${src}</b> · Datei: <code>${esc(settingsData.path)}</code></p>` +
+    `<div id="settlist">${rows}</div>` +
+    `<div class="sett-actions">
+       <button id="sett-add">+ Server hinzufügen</button>
+       <button id="sett-save" class="primary">💾 Speichern</button>
+       <span id="sett-status" class="hint"></span>
+     </div>`;
+  box.querySelector("#sett-add").addEventListener("click", () => {
+    const list = document.getElementById("settlist");
+    const div = document.createElement("div");
+    div.className = "sett-row";
+    div.innerHTML = `<input class="sett-name" placeholder="Name (z.B. Unraid)">` +
+      `<input class="sett-url" placeholder="URL oder 'local'">` +
+      `<button class="sett-del" title="Entfernen">✕</button>`;
+    div.querySelector(".sett-del").addEventListener("click", () => div.remove());
+    list.appendChild(div);
+  });
+  box.querySelectorAll(".sett-del").forEach(b =>
+    b.addEventListener("click", e => e.target.closest(".sett-row").remove()));
+  box.querySelector("#sett-save").addEventListener("click", saveSettings);
+}
+
+async function saveSettings() {
+  const list = document.getElementById("settlist");
+  const servers = [];
+  for (const row of list.querySelectorAll(".sett-row")) {
+    const name = row.querySelector(".sett-name").value.trim();
+    const url = row.querySelector(".sett-url").value.trim();
+    if (!name) continue;
+    servers.push({ name, url: url === "" ? null : url });
+  }
+  const status = document.getElementById("sett-status");
+  if (!servers.length) {
+    status.textContent = "Keine gültigen Server (Name erforderlich).";
+    return;
+  }
+  try {
+    const r = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ servers }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) {
+      status.textContent = "✅ Gespeichert (" + servers.length + " Server).";
+      loadSettings();
+    } else if (r.status === 409 && d.hint) {
+      status.textContent = "";
+      alert(d.hint);
+    } else {
+      status.textContent = "Fehler: " + (d.error || r.status);
+    }
+  } catch (e) {
+    status.textContent = "Netzwerkfehler.";
   }
 }
 

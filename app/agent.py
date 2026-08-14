@@ -104,13 +104,20 @@ def parse_ss(output: str) -> dict:
             # Seite (lokaler Port == host-port) von der ausgehenden
             # Weiterleitung an den Container zu unterscheiden.
             lport = 0
+            raddr = ""
+            estab = line.startswith("ESTAB")
             try:
                 parts = line.split()
                 if len(parts) >= 4:
                     lport = int(parts[3].rsplit(":", 1)[-1].rstrip("]"))
+                # Remote-IP (5. Feld) ohne Port: z. B. "10.0.0.5:50321"
+                # -> "10.0.0.5"; IPv6 "[fe80::1]:445" -> "fe80::1"
+                if len(parts) >= 5 and parts[4] != "0.0.0.0:*":
+                    raddr = parts[4].rsplit(":", 1)[0].lstrip("[").rstrip("]")
             except ValueError:
                 lport = 0
-            res.setdefault(cur, {"pid": int(m.group(3)), "rx": 0, "tx": 0, "lport": lport})
+            res.setdefault(cur, {"pid": int(m.group(3)), "rx": 0, "tx": 0,
+                                 "lport": lport, "raddr": raddr, "estab": estab})
             continue
         if cur is None:
             continue
@@ -192,6 +199,13 @@ class Sampler:
         self._disk_ema: dict = {}    # name -> {"read": float, "write": float}
         self._disk_active: dict = {} # name -> monotonic timestamp
         self._disk_cont: dict = {}   # name -> container (persistent, kein Flackern)
+
+        # CPU/RAM pro Prozess (/proc/stat + /proc/<pid>/stat)
+        self._cpu_tot_prev: tuple | None = None  # (cpu_total, cpu_idle) kumulativ
+        self._cpu_prev: dict = {}    # pid -> utime+stime kumulativ
+        self._sys_ema: dict = {}     # name -> CPU% (geglättet)
+        self._sys_active: dict = {}  # name -> monotonic timestamp
+        self._sys_cont: dict = {}    # name -> container (persistent, kein Flackern)
 
     # ------------------------------------------------------------------
     # Hilfen
@@ -363,6 +377,134 @@ class Sampler:
         ]
         out.sort(key=lambda p: p["read"] + p["write"], reverse=True)
         return out
+
+    # ------------------------------------------------------------------
+    # CPU/RAM pro Prozess (/proc/stat + /proc/<pid>/stat + /proc/meminfo)
+    # ------------------------------------------------------------------
+    def _sys_tick(self, mono: float, dt: float) -> dict:
+        """CPU% + RAM pro Prozess + Host-Gesamtwerte.
+
+        CPU: Differenz der /proc/stat-Zeiten (utime/stime bzw. Gesamt-CPU)
+        ueber dt — wie bei den Netz/Disk-Zaehlern. RAM ist ein Zustand
+        (kein Zaehler): MemAvailable/VmRSS direkt.
+        """
+        # --- Host-CPU aus /proc/stat ---
+        cpu_total = cpu_idle = 0.0
+        try:
+            with open(f"{PROC}/stat") as f:
+                for line in f:
+                    if line.startswith("cpu "):
+                        vals = [float(x) for x in line.split()[1:]]
+                        cpu_total = sum(vals)
+                        cpu_idle = vals[3] + vals[4]  # idle + iowait
+                        break
+        except OSError:
+            pass
+        cpu_pct = 0.0
+        if self._cpu_tot_prev and dt > 0 and cpu_total > self._cpu_tot_prev[0]:
+            t_d = cpu_total - self._cpu_tot_prev[0]
+            i_d = (cpu_total - cpu_idle) - (self._cpu_tot_prev[0] - self._cpu_tot_prev[1])
+            if t_d > 0:
+                cpu_pct = max(0.0, (i_d / t_d) * 100.0)
+        self._cpu_tot_prev = (cpu_total, cpu_idle)
+
+        # --- RAM gesamt ---
+        mem_total = mem_avail = 0
+        try:
+            with open(f"{PROC}/meminfo") as f:
+                for line in f:
+                    if line.startswith("MemTotal:"):
+                        mem_total = int(line.split()[1]) * 1024
+                    elif line.startswith("MemAvailable:"):
+                        mem_avail = int(line.split()[1]) * 1024
+        except (OSError, ValueError):
+            pass
+
+        # --- Pro-Prozess: CPU-Differenz + VmRSS ---
+        sys_raw: dict = {}
+        now_pids = set()
+        try:
+            for entry in os.scandir(PROC):
+                if not entry.name.isdigit():
+                    continue
+                pid = int(entry.name)
+                now_pids.add(pid)
+                try:
+                    with open(f"{PROC}/{pid}/stat") as f:
+                        st = f.read()
+                    rp = st.rfind(")")
+                    parts = st[rp + 2:].split()
+                    if len(parts) < 13:
+                        continue
+                    utime = float(parts[11])
+                    stime = float(parts[12])
+                    # RAM (VmRSS in kB -> Bytes)
+                    mem = 0
+                    try:
+                        with open(f"{PROC}/{pid}/status") as f:
+                            for line in f:
+                                if line.startswith("VmRSS:"):
+                                    mem = int(line.split()[1]) * 1024
+                                    break
+                    except (OSError, ValueError):
+                        pass
+                    prev = self._cpu_prev.get(pid)
+                    cpu = 0.0
+                    if prev is not None and dt > 0:
+                        d_proc = (utime + stime) - prev
+                        if d_proc > 0 and cpu_total > 0:
+                            # Anteil an der GESAMT-CPU-Zeit des Hosts
+                            # (t_d = totaler Zuwachs aller Kerne in diesem Tick)
+                            t_d = cpu_total - self._cpu_tot_prev[0] if self._cpu_tot_prev else 0
+                            if t_d > 0:
+                                cpu = max(0.0, (d_proc / t_d) * 100.0)
+                    self._cpu_prev[pid] = utime + stime
+                    if cpu > 0.3 or mem > 5 * 1024 * 1024:
+                        sys_raw[pid] = (cpu, mem)
+                except (OSError, ValueError):
+                    continue
+        except OSError:
+            pass
+        # tote PIDs raeumen
+        self._cpu_prev = {k: v for k, v in self._cpu_prev.items() if k in now_pids}
+
+        # --- EMA + Decay fuer CPU (RAM bleibt roh) ---
+        sys_emitted = {}
+        for pid, (cpu, mem) in sys_raw.items():
+            name = self.comm_for(pid)
+            key = name
+            old = self._sys_ema.get(key)
+            cpu_s = EMA * cpu + (1 - EMA) * old if old else cpu
+            self._sys_ema[key] = cpu_s
+            self._sys_active[key] = mono
+            e = sys_emitted.setdefault(key, [0.0, 0])
+            e[0] = max(e[0], cpu_s)
+            e[1] += mem
+            ns = self.netns_of(pid)
+            if ns:
+                cname = self._containers.get(ns)
+                if cname:
+                    self._sys_cont.setdefault(key, cname)
+        for key in list(self._sys_ema):
+            if (mono - self._sys_active.get(key, 0.0)) >= DECAY_S:
+                del self._sys_ema[key]
+                self._sys_active.pop(key, None)
+                self._sys_cont.pop(key, None)
+                sys_emitted.pop(key, None)
+        sys_cont = {k: v for k, v in self._sys_cont.items() if k in sys_emitted}
+
+        procs = [
+            {"name": n, "cpu": round(v[0], 1), "mem": v[1],
+             "container": sys_cont.get(n)}
+            for n, v in sys_emitted.items()
+        ]
+        procs.sort(key=lambda p: p["cpu"], reverse=True)
+        return {
+            "cpu": round(cpu_pct, 1),
+            "mem_total": mem_total,
+            "mem_used": max(0, mem_total - mem_avail),
+            "procs": procs,
+        }
 
     # ------------------------------------------------------------------
     # Docker-Socket (optional): Prozess/Container-Zuordnung
@@ -550,6 +692,7 @@ class Sampler:
         # sein als die Gesamt-Uplink-Rate des Hosts in derselben Sekunde.
         link_cap = totals["rx"] + totals["tx"]
         raw: dict = {}
+        conn_counts: dict = {}
         # Persistente Zuordnungen uebernehmen: ein einmal zugeordneter
         # docker-proxy behaelt sein Badge, auch wenn der Socket kurz pausiert.
         proc_cont: dict = dict(self._proc_cont)
@@ -596,6 +739,11 @@ class Sampler:
                     # eingehende Seite (lokaler Port == host-port) zaehlen.
                     if port and s.get("lport") and s["lport"] != port:
                         continue
+                # SMB-Sessions: smbd pro Client-IP ausweisen (Remote-Adresse des
+                # Sockets = SMB-Client). So sieht man, welcher Client gerade wie
+                # viel ueber SMB laedt (statt nur "smbd" aggregiert).
+                if name == "smbd" and s.get("raddr"):
+                    name = f"smbd[{s['raddr']}]"
                 e = raw.setdefault(name, [0.0, 0.0])
                 e[0] += drx
                 e[1] += dtx
@@ -605,6 +753,23 @@ class Sampler:
                     if cname:
                         proc_cont.setdefault(name, cname)
             self._prev_ss = ss
+
+            # Connections: aktive ESTAB-Sockets pro Prozess-Label zaehlen
+            # (alle Verbindungen, nicht nur die mit Rate in diesem Tick).
+            conn_counts: dict = {}
+            if ss:
+                for s2 in ss.values():
+                    if not (s2.get("estab") and s2.get("pid")):
+                        continue
+                    nm = self.comm_for(s2["pid"])
+                    if nm == "docker-proxy":
+                        port = self.proxy_port_of(s2["pid"])
+                        cname = self._port_containers.get(port) if port else None
+                        if cname:
+                            nm = f"docker-proxy:{port}"
+                    elif nm == "smbd" and s2.get("raddr"):
+                        nm = f"smbd[{s2['raddr']}]"
+                    conn_counts[nm] = conn_counts.get(nm, 0) + 1
 
             # Caches auf lebende PIDs begrenzen
             alive = set(s["pid"] for s in ss.values())
@@ -669,7 +834,8 @@ class Sampler:
 
         procs_list = [
             {"name": n, "rx": round(v["rx"], 1), "tx": round(v["tx"], 1),
-             "container": proc_cont.get(n)}
+             "container": proc_cont.get(n),
+             "conns": conn_counts.get(n, 0)}
             for n, v in emitted.items()
         ]
         procs_list.sort(key=lambda p: p["rx"] + p["tx"], reverse=True)
@@ -707,6 +873,8 @@ class Sampler:
 
         # Disk-I/O pro Prozess (unabhängig von ss/Netzwerk)
         disk_list = self._disk_tick(mono, dt)
+        # CPU/RAM pro Prozess (unabhängig von ss/Netzwerk)
+        system = self._sys_tick(mono, dt)
 
         with self.lock:
             self._last = {
@@ -719,6 +887,7 @@ class Sampler:
                 "processes": procs_list,
                 "containers": containers_list,
                 "disk": disk_list,
+                "system": system,
                 "ss_error": self._ss_error,
                 "ss_ok": ss is not None,
                 # Diagnose: pid1 != Container-Init -> pid:host aktiv
@@ -748,6 +917,7 @@ class Sampler:
                     "processes": [],
                     "containers": [],
                     "disk": [],
+                    "system": {"cpu": 0.0, "mem_total": 0, "mem_used": 0, "procs": []},
                     "ss_error": self._ss_error,
                     "ss_ok": False,
                     "pid1": self._pid1_comm(),

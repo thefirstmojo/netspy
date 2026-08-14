@@ -10,6 +10,12 @@ Configuration (env):
   UPLINK      "br0"                (comma-separated, empty = auto)
   DOCKER_SOCK "/var/run/docker.sock"  (empty = disabled)
   AGENT_TOKEN ""                   (optional, shared token)
+  CONFIG_DIR  "/data"              (writable volume; servers.json lives here)
+
+Server list: if <CONFIG_DIR>/servers.json exists (and is valid) it wins.
+Otherwise the SERVERS env var is used (fallback — old composes keep
+working without a volume). The settings UI writes servers.json and
+shows a hint when the directory is not writable.
 """
 from __future__ import annotations
 
@@ -54,17 +60,64 @@ def parse_servers(spec: str) -> list:
     return out
 
 
+def config_path(config_dir: str) -> str:
+    return os.path.join(config_dir, "servers.json")
+
+
+def config_writable(config_dir: str) -> bool:
+    """True, wenn <config_dir> existiert/anlegbar und schreibbar ist."""
+    try:
+        os.makedirs(config_dir, exist_ok=True)
+        return os.access(config_dir, os.W_OK)
+    except OSError:
+        return False
+
+
+def load_servers(env_servers: str, config_dir: str) -> list:
+    """servers.json gewinnt, wenn vorhanden + valide; sonst Env-Fallback.
+
+    So bleiben alte Installationen ohne Volume unveraendert funktionsfaehig.
+    Defekte/leere Dateien fallen ebenfalls auf die Env-Variablen zurueck."""
+    path = config_path(config_dir)
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        if (isinstance(data, list) and data
+                and all(isinstance(s, dict) and s.get("name") for s in data)):
+            return [{"name": str(s["name"]), "url": s.get("url")} for s in data]
+    except (OSError, ValueError):
+        pass
+    return parse_servers(env_servers)
+
+
+def save_servers(servers: list, config_dir: str) -> str:
+    """Speichert die Server-Liste atomar nach <config_dir>/servers.json.
+
+    Wirft OSError, wenn der Pfad nicht schreibbar ist (kein Volume gemountet)."""
+    os.makedirs(config_dir, exist_ok=True)
+    path = config_path(config_dir)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(servers, f, indent=2)
+    os.replace(tmp, path)
+    return path
+
+
 class Monitor:
     """Pollt alle Server (1/s), haelt History + letzte Snapshots."""
 
     def __init__(self, servers: list, uplink: str = "", docker_sock: str = "",
-                 token: str = ""):
+                 token: str = "", config_dir: str = "/data"):
         self.servers = servers
         self.token = token
+        self.config_dir = config_dir
+        self._uplink = uplink
+        self._docker_sock = docker_sock
         self.lock = threading.Lock()
         self.history: dict = {}
         self.proc_history: dict = {}   # server -> {proc_name -> deque[(ts,rx,tx)]}
         self.proc_snaps: dict = {}     # server -> deque[(ts, [[name,cont,rx,tx],...])]
+        self.latency: dict = {}        # server -> deque[(ts, ms)] (Poll-Antwortzeit)
         self.snaps: dict = {}
         self.online: dict = {}
         self.errors: dict = {}
@@ -75,14 +128,51 @@ class Monitor:
             self.history[name] = deque(maxlen=3600)  # 1 h bei 1 s
             self.proc_history[name] = {}
             self.proc_snaps[name] = deque(maxlen=300)  # Zeit-Snapshots fuer Hover-Tooltip
+            self.latency[name] = deque(maxlen=300)
             self.snaps[name] = None
             self.online[name] = False
             self.errors[name] = ""
             if s["url"] is None:
                 self.sampler = Sampler(uplink=uplink, docker_sock=docker_sock)
 
+    def set_servers(self, servers: list) -> None:
+        """Server-Liste zur Laufzeit ersetzen (Settings-UI).
+
+        Neue Server werden initialisiert, entfernte aufgeraeumt — bestehende
+        Strukturen (History etc.) bleiben erhalten. Falsche/offline Server
+        fuehren nur zu leeren Feldern, nie zu einem Crash."""
+        with self.lock:
+            old = {s["name"] for s in self.servers}
+            new = {s["name"] for s in servers}
+            for s in servers:
+                name = s["name"]
+                if name not in self.history:
+                    self.history[name] = deque(maxlen=3600)
+                    self.proc_history[name] = {}
+                    self.proc_snaps[name] = deque(maxlen=300)
+                    self.latency[name] = deque(maxlen=300)
+                self.snaps.setdefault(name, None)
+                self.online.setdefault(name, False)
+                self.errors.setdefault(name, "")
+            for name in old - new:
+                self.history.pop(name, None)
+                self.proc_history.pop(name, None)
+                self.proc_snaps.pop(name, None)
+                self.latency.pop(name, None)
+                self.snaps.pop(name, None)
+                self.online.pop(name, None)
+                self.errors.pop(name, None)
+            self.servers = servers
+            # Lokaler Sampler nachruesten, wenn ein lokaler Server hinzukam
+            has_local = any(s.get("url") is None for s in servers)
+            if has_local and self.sampler is None:
+                self.sampler = Sampler(uplink=self._uplink,
+                                       docker_sock=self._docker_sock)
+
     def _poll_one(self, s):
-        """Fetch one server (used by poll_loop in parallel)."""
+        """Fetch one server (used by poll_loop in parallel). Returns
+        (name, snap, err, latency_ms)."""
+        t0 = time.monotonic()
         try:
             if s["url"] is None:
                 snap = self.sampler.snapshot() if self.sampler else None
@@ -90,9 +180,9 @@ class Monitor:
                 snap = self._fetch(s["url"])
             if snap is None:
                 raise RuntimeError("no local sampler")
-            return s["name"], snap, None
+            return s["name"], snap, None, (time.monotonic() - t0) * 1000.0
         except Exception as e:
-            return s["name"], None, str(e)
+            return s["name"], None, str(e), None
 
     def poll_loop(self) -> None:
         """Pollt alle Server PARALLEL — skaliert auf N Hosts,
@@ -100,12 +190,14 @@ class Monitor:
         workers = max(4, len(self.servers))
         with ThreadPoolExecutor(max_workers=workers) as ex:
             while True:
-                for name, snap, err in ex.map(self._poll_one, self.servers):
+                for name, snap, err, ms in ex.map(self._poll_one, self.servers):
                     with self.lock:
                         if snap is not None:
                             self.snaps[name] = snap
                             self.online[name] = True
                             self.errors[name] = ""
+                            if ms is not None:
+                                self.latency[name].append((time.time(), ms))
                             self.history[name].append(
                                 (snap["ts"], snap["totals"]["rx"], snap["totals"]["tx"])
                             )
@@ -126,6 +218,7 @@ class Monitor:
                         else:
                             self.online[name] = False
                             self.errors[name] = err or ""
+                            self.latency[name].append((time.time(), -1.0))
                 time.sleep(1.0)
 
     def _fetch(self, url: str) -> dict:
@@ -197,6 +290,31 @@ class Monitor:
                               "total": total, "hosts": v["hosts"]})
             drows.sort(key=lambda r: r["total"], reverse=True)
 
+            # CPU/RAM pro Prozess (name x server)
+            stable: dict = {}
+            for s in self.servers:
+                name = s["name"]
+                snap = self.snaps.get(name)
+                if not snap:
+                    continue
+                sysd = snap.get("system") or {}
+                for p in sysd.get("procs", []):
+                    row = stable.setdefault(p["name"], {"hosts": {}})
+                    row["hosts"][name] = {"cpu": p["cpu"], "mem": p["mem"]}
+                    if p.get("container"):
+                        row.setdefault("container", p["container"])
+            srows = []
+            for pname, v in stable.items():
+                total = sum(x["cpu"] for x in v["hosts"].values())
+                srows.append({"name": pname, "container": v.get("container"),
+                              "total": total, "hosts": v["hosts"]})
+            srows.sort(key=lambda r: r["total"], reverse=True)
+
+            host_sys = {
+                s["name"]: (self.snaps.get(s["name"]) or {}).get("system", {})
+                for s in self.servers
+            }
+
             return {
                 "version": VERSION,
                 "servers": [
@@ -218,6 +336,15 @@ class Monitor:
                 },
                 "table": rows,
                 "disk": drows,
+                "system": srows,
+                "host_sys": host_sys,
+                "latency": {
+                    s["name"]: {
+                        "ts": [p[0] for p in list(self.latency.get(s["name"], []))],
+                        "ms": [p[1] for p in list(self.latency.get(s["name"], []))],
+                    }
+                    for s in self.servers
+                },
                 "ts": time.time(),
             }
 
@@ -272,6 +399,21 @@ class WebHandler(BaseHTTPRequestHandler):
             body = json.dumps(self.server.monitor.prochistory()).encode()
             self._send_bytes(200, body, "application/json")
             return
+        if path == "/api/settings":
+            mon = self.server.monitor
+            writable = config_writable(mon.config_dir)
+            src = "file" if os.path.exists(config_path(mon.config_dir)) else "env"
+            body = json.dumps({
+                "path": config_path(mon.config_dir),
+                "writable": writable,
+                "source": src,
+                "servers": [
+                    {"name": s["name"], "url": s.get("url")}
+                    for s in mon.servers
+                ],
+            }).encode()
+            self._send_bytes(200, body, "application/json")
+            return
         if path == "/api/process_history":
             from urllib.parse import parse_qs, unquote
             q = parse_qs(raw_path.split("?", 1)[1]) if "?" in raw_path else {}
@@ -295,6 +437,64 @@ class WebHandler(BaseHTTPRequestHandler):
                 return
         self._send_bytes(404, b"not found", "text/plain")
 
+    def do_POST(self):  # noqa: N802
+        path = self.path.split("?")[0]
+        if path == "/api/settings":
+            mon = self.server.monitor
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                data = json.loads(self.rfile.read(length).decode() or "{}")
+            except (ValueError, OSError):
+                self._send_bytes(400, b'{"error":"invalid body"}', "application/json")
+                return
+            servers = data.get("servers")
+            if not isinstance(servers, list) or not servers:
+                self._send_bytes(400, b'{"error":"servers must be a non-empty list"}',
+                                 "application/json")
+                return
+            cleaned = []
+            for s in servers:
+                if not isinstance(s, dict):
+                    continue
+                name = str(s.get("name") or "").strip()
+                if not name:
+                    continue
+                url = s.get("url")
+                cleaned.append({"name": name, "url": (url or None)})
+            if not cleaned:
+                self._send_bytes(400, b'{"error":"no valid servers"}', "application/json")
+                return
+            if not config_writable(mon.config_dir):
+                hint = (
+                    f"Config-Ordner {mon.config_dir} ist nicht beschreibbar. "
+                    "Binde ein Volume ein, damit die Einstellungen gespeichert "
+                    "werden koennen. In der docker-compose.yml des NetSpy-Web-"
+                    "Containers ergaenzen (Beispiel Unraid):\n\n"
+                    "    volumes:\n"
+                    "      - /mnt/user/appdata/netspy:/data\n\n"
+                    "Fuer andere Systeme entsprechend z. B.:\n"
+                    "      - /opt/netspy-data:/data\n\n"
+                    "Danach Container neu erstellen (docker compose up -d bzw. "
+                    "Stack neu deployen). Ohne Volume funktioniert die "
+                    "Konfiguration ueber die SERVERS-Umgebungsvariable weiter."
+                )
+                self._send_bytes(409, json.dumps({
+                    "error": "config dir not writable", "hint": hint
+                }).encode(), "application/json")
+                return
+            try:
+                save_servers(cleaned, mon.config_dir)
+                mon.set_servers(cleaned)
+            except OSError as e:
+                self._send_bytes(500, json.dumps({
+                    "error": f"save failed: {e}",
+                    "hint": "Volume nicht beschreibbar? Siehe /api/settings.",
+                }).encode(), "application/json")
+                return
+            self._send_bytes(200, b'{"ok":true}', "application/json")
+            return
+        self._send_bytes(404, b"not found", "text/plain")
+
     def log_message(self, *args):  # still
         pass
 
@@ -309,13 +509,15 @@ def start_web(monitor: Monitor, port: int = 8090) -> ThreadingHTTPServer:
 
 
 def main() -> None:
-    servers = parse_servers(os.environ.get("SERVERS", "Unraid=local"))
+    config_dir = os.environ.get("CONFIG_DIR", "/data")
+    servers = load_servers(os.environ.get("SERVERS", "Unraid=local"), config_dir)
     token = os.environ.get("AGENT_TOKEN", "")
     mon = Monitor(
         servers,
         uplink=os.environ.get("UPLINK", ""),
         docker_sock=os.environ.get("DOCKER_SOCK", "/var/run/docker.sock"),
         token=token,
+        config_dir=config_dir,
     )
     start_web(mon, port=int(os.environ.get("WEB_PORT", "8090")))
 
@@ -323,7 +525,9 @@ def main() -> None:
     if mon.sampler is not None:
         start_agent(mon.sampler, port=int(os.environ.get("AGENT_PORT", "8091")), token=token)
 
+    src = "file" if os.path.exists(config_path(config_dir)) else "env"
     print(f"NetMon-Web auf :{os.environ.get('WEB_PORT', '8090')} "
-          f"-> Server: {[s['name'] for s in servers]}")
+          f"-> Server: {[s['name'] for s in servers]} "
+          f"(Config-Quelle: {src}, Pfad: {config_path(config_dir)})")
     while True:
         time.sleep(3600)

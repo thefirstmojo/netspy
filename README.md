@@ -41,6 +41,24 @@ read/write rates per process. **One image, two roles, one compose.**
 ![Disk I/O tab](docs/screenshots/disk-tab.png)
 *Disk I/O tab with live data — processes with their real read/write rates and container badges.*
 
+- **SMB sessions per client** (v0.5) — `smbd` rows are broken down per client
+  IP (`smbd[10.0.0.5]`) so you see exactly which client is loading the
+  share (instead of one aggregated `smbd` row).
+- **Connection count column** (v0.5) — active TCP connections per process
+  (e.g. `docker-proxy:6379` with 47 conns) — instantly explains traffic
+  patterns and pooling.
+- **⚙️ CPU/RAM tab** (v0.5) — CPU% and resident RAM per process from
+  `/proc/stat` + `/proc/<pid>/stat` + VmRSS, plus per-server host totals.
+- **Latency / health monitor** (v0.5) — each server shows its live poll
+  response time (ms badge with green/yellow/red thresholds) and a 5 min
+  latency chart — hanging agents become visible before they drop offline.
+- **🛠️ Settings page** (v0.5) — manage servers in the web UI (name + URL).
+  Settings are stored in `<CONFIG_DIR>/servers.json` (mount a volume, e.g.
+  `/mnt/user/appdata/netspy:/data`). **Backwards compatible:** without a
+  volume the `SERVERS` env var keeps working (fallback), existing composes
+  are untouched, and the first save adopts the current env servers as base.
+  The UI shows an explicit hint (with compose example) when the config dir is
+  not writable.
 - **Artifact protection** (v0.3.3x): docker-proxy double-counting eliminated
   (only the ingress side of each proxied connection counts), per-process rates
   are clamped to the physical interface rate, and the process sum can never
@@ -206,6 +224,7 @@ All values are set **directly in `docker-compose.yml`** (no `.env` file):
 | `AGENT_PORT` | `8091` | Host port of the agent API (same) |
 | `AGENT_TOKEN` | empty | Header `X-Agent-Token` (must match on all hosts) |
 | `DOCKER_SOCK` | `/var/run/docker.sock` (web) | Docker socket for container rows; `""` disables |
+| `CONFIG_DIR` | `/data` (web) | Writable volume for `servers.json` (settings UI). Without a volume the `SERVERS` env is used as fallback |
 
 Plus two commented option blocks in the compose, enabled per host:
 - **AppArmor** (`security_opt: [apparmor:unconfined]`) — hosts that enforce an
