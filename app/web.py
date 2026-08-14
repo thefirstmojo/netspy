@@ -122,7 +122,8 @@ def _read_file(path: str):
 
 def load_servers(env_servers: str, config_dir: str) -> list:
     """servers.yaml gewinnt, dann servers.json (Legacy-Migration),
-    sonst Env-Fallback. Alte Installationen bleiben funktionsfaehig."""
+    sonst Env-Fallback. Ohne jede Angabe wird ein lokaler Server
+    ('Main=local') ergaenzt, damit das Dashboard immer starten kann."""
     # 1) servers.yaml (menscheneditierbar, neu ab v0.5.1)
     txt = _read_file(config_path(config_dir))
     if txt is not None:
@@ -142,8 +143,11 @@ def load_servers(env_servers: str, config_dir: str) -> list:
                 return v
         except Exception:
             pass
-    # 3) Env-Fallback
-    return parse_servers(env_servers)
+    # 3) Env-Fallback; leer/nicht gesetzt -> lokalen Server ergaenzen
+    v = parse_servers(env_servers)
+    if not v:
+        v = [{"name": "Main", "url": None}]
+    return v
 
 
 def save_servers(servers: list, config_dir: str) -> str:
@@ -690,7 +694,7 @@ def _config_source(config_dir: str) -> str:
 
 def main() -> None:
     config_dir = resolve_config_dir(os.environ.get("CONFIG_DIR", ""))
-    servers = load_servers(os.environ.get("SERVERS", "Unraid=local"), config_dir)
+    servers = load_servers(os.environ.get("SERVERS", ""), config_dir)
     token = os.environ.get("AGENT_TOKEN", "")
     mon = Monitor(
         servers,

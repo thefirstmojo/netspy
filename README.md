@@ -54,12 +54,12 @@ All values live directly in `docker-compose.yml` — no `.env` file.
 | Key | Default | Description |
 |---|---|---|
 | `ROLE` | `web` | `web` (UI + sampler) or `agent` (sampler only) |
-| `SERVERS` | `Main=local` | `Name=local;Name=http://host:8091` — semicolon-separated |
+| `SERVERS` | `Main=local` (optional) | `Name=local;Name=http://host:8091` — semicolon-separated. **Optional:** if unset or empty, a local server (`Main=local`) is added automatically on first start |
 | `UPLINK` | auto (default route) | Comma-separated override, e.g. `br0,bond0` |
 | `WEB_PORT` / `AGENT_PORT` | `8090` / `8091` | Host ports (host networking — the values ARE the external ports) |
 | `AGENT_TOKEN` | empty | Shared `X-Agent-Token` header — **must match on all hosts** |
 | `DOCKER_SOCK` | `/var/run/docker.sock` (web) | Docker socket for per-container rows; `""` disables |
-| `CONFIG_DIR` | auto-detected | Volume for `servers.yaml` — `/netspy` mount → `/netspy/config`; old `/config` mounts keep working |
+| `CONFIG_DIR` | auto-detected | Volume for `servers.yaml` — `/netspy` mount → `/netspy/config` |
 
 Plus two commented blocks in the compose, enabled per host: **AppArmor** (`security_opt: [apparmor:unconfined]`, hosts that enforce it) and the **Docker socket** volume.
 
