@@ -1,9 +1,10 @@
-# NetSpy — Live network monitoring for Unraid + other servers
+# NetSpy — Live network + disk monitoring for Unraid + other servers
 
 [![Build](https://github.com/thefirstmojo/netspy/actions/workflows/publish-image.yml/badge.svg)](https://github.com/thefirstmojo/netspy/actions/workflows/publish-image.yml)
 
 Web dashboard showing **interface and per-process network throughput** of Unraid
-and other servers in real time (1 s sampling). **One image, two roles, one compose.**
+and other servers in real time (1 s sampling) — plus a **Disk I/O tab** with
+read/write rates per process. **One image, two roles, one compose.**
 
 ![NetSpy dashboard](docs/screenshot.png)
 *Screenshot shows synthetic demo data (two servers "Main"/"Backup") — no real hosts or containers.*
@@ -21,6 +22,32 @@ and other servers in real time (1 s sampling). **One image, two roles, one compo
 |---|---|---|
 | `ROLE=web` | Web UI (:8090) + local sampler + agent API (:8091) | Unraid |
 | `ROLE=agent` | Sampler + agent API only (:8091) | TrueNAS |
+
+## Features
+
+- **Live network throughput** per server (1 s sampling): interface rates,
+  per-process rates (TCP, tracked per socket inode — immune to fork/handover
+  spikes) and per-container rows (veth → container, via the read-only Docker
+  socket).
+- **Detail charts per process** — click any table row to get its own 1 h
+  history chart; hover shows the exact values plus the top processes of that
+  exact moment (frozen tooltip).
+- **Server filter chips** — toggle which servers appear in tables and charts.
+- **💾 Disk I/O tab** (v0.4) — read/write rates per process from
+  `/proc/<pid>/io` (real storage-layer bytes, **incl. CIFS/NFS mounts**, so SMB
+  transfers show up on the reading process). EMA-smoothed with activity decay,
+  sortable by process / server / read / write, with container badges.
+
+![Disk I/O tab](docs/screenshots/disk-tab.svg)
+*Disk I/O tab with live data — processes with their real read/write rates and container badges.*
+
+- **Artifact protection** (v0.3.3x): docker-proxy double-counting eliminated
+  (only the ingress side of each proxied connection counts), per-process rates
+  are clamped to the physical interface rate, and the process sum can never
+  exceed the host total (excess lands in the "not assigned" row).
+- **Host-network containers** get no container badge (they share the host netns
+  and are indistinguishable from host processes — avoids false attribution).
+- **1 h history** in the web container's memory (no DB needed).
 
 ## Architecture
 
