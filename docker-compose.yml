@@ -34,7 +34,12 @@ services:
     cap_drop: [ALL]
     # SYS_PTRACE: needed to attribute sockets of non-root processes
     # via /proc/<pid>/fd.
-    cap_add: [SYS_PTRACE]
+    # DAC_OVERRIDE: the container runs as root, but with cap_drop ALL it
+    # cannot write into host folders owned by another uid (e.g. Unraid's
+    # 99:users appdata with mode 755). Most Unraid containers run as
+    # PUID=99 instead; NetSpy MUST stay root (it reads /proc of all
+    # processes), so it needs DAC_OVERRIDE to write its config volume.
+    cap_add: [SYS_PTRACE, DAC_OVERRIDE]
 
     # ── Only needed when the host enforces an AppArmor profile on        ──
     # ── containers (TrueNAS always does; Debian only if AppArmor is      ──

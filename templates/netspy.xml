@@ -28,8 +28,11 @@
     <Mode>host</Mode>
   </Networking>
   <!-- host networking + host PID namespace are required: the sampler reads /proc and ss of the real host.
-       SYS_PTRACE: attribute sockets of non-root processes. AppArmor is not enforced on Unraid. -->
-  <ExtraParams>--pid=host --cap-drop=ALL --cap-add=SYS_PTRACE</ExtraParams>
+       SYS_PTRACE: attribute sockets of non-root processes. AppArmor is not enforced on Unraid.
+       DAC_OVERRIDE: container runs as root (needed for /proc of all processes), but cap_drop ALL
+       blocks writes into appdata folders owned by 99:users (mode 755) — DAC_OVERRIDE restores that,
+       like other root-based containers. -->
+  <ExtraParams>--pid=host --cap-drop=ALL --cap-add=SYS_PTRACE --cap-add=DAC_OVERRIDE</ExtraParams>
   <Config Name="ROLE" Target="ROLE" Default="web" Mode="rw" Description="Role: web = dashboard + local sampler (this host); agent = collector for another web instance." Type="Variable" Display="always" Required="false" Mask="false"/>
   <Config Name="SERVERS" Target="SERVERS" Default="Unraid=local" Mode="rw" Description="Servers the dashboard polls, semicolon-separated: Name=local;Name=http://host:8091. 'local' samples this host directly; http://... polls an agent on another host." Type="Variable" Display="always" Required="false" Mask="false"/>
   <Config Name="UPLINK" Target="UPLINK" Default="" Mode="rw" Description="Optional override of the uplink interfaces (comma-separated, e.g. br0,bond0). Empty = auto-detect via default route (br0 on Unraid)." Type="Variable" Display="always" Required="false" Mask="false"/>
