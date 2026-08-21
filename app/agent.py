@@ -971,12 +971,8 @@ class Sampler:
                 "securityfs", "debugfs", "tracefs", "bpf", "autofs",
                 "squashfs", "ramfs", "pstore", "binfmt_misc", "configfs",
                 "rpc_pipefs", "nsfs", "rootfs", "efivarfs"}
-        # Standard-Container-Verzeichnisse für Laufwerke: selbst wenn dort
-        # ein Mount liegt (Unraid /mnt=rootfs, TrueNAS /mnt=ZFS-Dataset),
-        # zählt er nie als Laufwerk UND nie als Überordner — sonst schneidet
-        # er alle echten Laufwerke darunter ab (/mnt/TrueNAS, /mnt/disk1 …)
-        container_dirs = {"/mnt", "/media", "/run/media", "/Volumes"}
-
+        # Kein Pfad-Filter mehr: der Dateibrowser zeigt ALLE Ebenen.
+        # Nur Pseudo-Dateisysteme (skip oben) sind raus.
         def _unesc(s):
             return (s.replace("\\040", " ").replace("\\011", "\t")
                      .replace("\\012", "\n").replace("\\134", "\\"))
@@ -996,7 +992,7 @@ class Sampler:
                 if len(fld) < 3:
                     continue
                 dev, path, fstype = fld[0], fld[1], fld[2]
-                if fstype in skip or path in container_dirs or path in seen_paths:
+                if fstype in skip or path in seen_paths:
                     continue
                 seen_paths.add(path)
                 mounts.append([dev, path, fstype])

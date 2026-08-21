@@ -807,9 +807,14 @@ function renderStorage() {
   try { stExpanded = JSON.parse(localStorage.getItem("netspy.storageExpanded") || "[]"); } catch (e) { /* still */ }
   const expSet = new Set(stExpanded);
   if (!stExpanded.length) {
-    // Erstbesuch: oberste Ebene sichtbar — die Roots sind aufgeklappt,
-    // damit man die Hauptlaufwerke SOFORT sieht (TrueNAS: / -> Pools)
-    allKeys.forEach(k => { if ((((available || {})[k] || {}).level || 0) === 0) expSet.add(k); });
+    // Erstbesuch: oberste Ebene sichtbar — Roots UND Container-Ordner
+    // (/mnt) sind aufgeklappt, damit man die Hauptlaufwerke SOFORT sieht
+    // (TrueNAS: / -> /mnt -> Pools)
+    const cntDirs = ["/mnt", "/media", "/run/media", "/Volumes"];
+    allKeys.forEach(k => {
+      const a = (available || {})[k] || {};
+      if ((a.level || 0) === 0 || cntDirs.includes(a.path || k)) expSet.add(k);
+    });
   }
   // Kinder eines Knotens: alle Einträge, deren parent == dessen Pfad ist.
   // Ohne parent-Feld (alter Agent) hängt alles am Root → flache Liste.
@@ -847,7 +852,7 @@ function renderStorage() {
       html += `<tr class="${gone ? "restrow" : ""}" data-key="${esc(k)}">
         <td class="pname" style="padding-left:${depth * 18}px">
           ${tw}${esc(stLabel(k))}
-          ${av.type === "zfs" && (av.path || k) !== "/" && name !== stLabel(k) ? ` <span class="stsub" title="${esc(name)}">${esc(name.split("/").pop())}</span>` : ""}
+          ${av.type === "zfs" && (av.path || k) !== "/" && name !== stLabel(k) ? ` <span class="stsub" title="${esc(name)}">${esc(name.split("/").slice(0, -1).join("/"))}</span>` : ""}
           ${gone ? ` <span class="stgone" title="no longer visible — data kept until you delete it">⚠️</span>` : ""}
         </td>
         <td class="srv">${esc(server)}</td>
