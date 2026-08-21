@@ -6,8 +6,12 @@
 FROM python:3.13-slim-bookworm
 
 # ss (iproute2) für die Per-Prozess-Messung (inet_diag),
-# zfsutils-linux für Pool-Füllstände (zpool list; braucht /dev/zfs am Host)
-RUN apt-get update \
+# zfsutils-linux für Pool-Füllstände (zpool list; braucht /dev/zfs am Host).
+# HINWEIS: zfsutils-linux liegt in bookworm im CONTRIB-Repo — die slim-Images
+# haben nur main aktiv, contrib wird hier ergänzt.
+RUN sed -i 's/^Components: main/Components: main contrib/' /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
+    echo "deb http://deb.debian.org/debian bookworm contrib" >> /etc/apt/sources.list 2>/dev/null || true; \
+    apt-get update \
     && apt-get install -y --no-install-recommends iproute2 zfsutils-linux \
     && rm -rf /var/lib/apt/lists/*
 
