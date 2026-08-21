@@ -622,98 +622,133 @@ async function loadStorage() {
   } catch (e) { /* Offline/Start -> still */ }
 }
 
+async function storagePost(act, key) {
+  try {
+    const r = await fetch("/api/storage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: act, key })
+    });
+    if (r.ok) loadStorage();
+  } catch (e) { /* still */ }
+}
+
 function renderStorage() {
   const grid = document.getElementById("storagegrid");
+  const tbody = document.getElementById("storagetbody");
   if (!grid || !storageData) return;
   const { enabled, recorded, available, host_access } = storageData;
-  const keys = [...new Set([...Object.keys(recorded || {}), ...Object.keys(available || {})])].sort();
-  const noHost = !keys.length && host_access && Object.values(host_access).some(v => v === false);
-  if (!keys.length) {
-    Object.values(storageCharts).forEach(ch => { try { ch.destroy(); } catch (e) { /* still */ } });
-    storageCharts = {};
-    grid.innerHTML = noHost
-      ? `<p class="hint" style="color:#fbbf24">⚠️ <b>No host access</b> — the container cannot read the host mounts. It must run with <code>--pid=host</code> (host PID namespace): in Unraid go to <b>Docker → NetSpy → Edit → Apply</b> (or <b>Reinstall</b>) so the change takes effect.</p>`
-      : `<p class="hint">No pools/filesystems detected yet — agents report storage every 60 s.</p>`;
-    return;
-  }
-  // Alte Chart-Instanzen sauber zerstören (Canvas werden gleich ersetzt)
+  const allKeys = [...new Set([...Object.keys(recorded || {}), ...Object.keys(available || {})])].sort();
+  const enabledKeys = allKeys.filter(k => (enabled || []).includes(k));
+  const noHost = !allKeys.length && host_access && Object.values(host_access).some(v => v === false);
+  // --- Karten oben: NUR aktivierte (recording) Laufwerke ---
   Object.values(storageCharts).forEach(ch => { try { ch.destroy(); } catch (e) { /* still */ } });
   storageCharts = {};
-  grid.innerHTML = keys.map(key => {
+  if (!enabledKeys.length) {
+    grid.innerHTML = noHost
+      ? `<p class="hint" style="color:#fbbf24">⚠️ <b>No host access</b> — the container cannot read the host mounts. It must run with <code>--pid=host</code> (host PID namespace): in Unraid go to <b>Docker → NetSpy → Edit → Apply</b> (or <b>Reinstall</b>) so the change takes effect.</p>`
+      : `<p class="hint">No drives recording — activate one in the list below.</p>`;
+  } else {
+    grid.innerHTML = enabledKeys.map(key => {
+      const rec = (recorded || {})[key] || {};
+      const av = (available || {})[key] || {};
+      const name = rec.name || av.name || key;
+      const server = rec.server || av.server || "";
+      const size = rec.size || av.size || 0;
+      const used = rec.used != null ? rec.used : (av.used || 0);
+      const p = stPct(size, used);
+      const gone = !av.name;
+      const isRec = true;  // Karten zeigen nur enabled Laufwerke
+      const hasData = (rec.h24 && rec.h24.length) || (rec.d7 && rec.d7.length);
+      const sname = esc(server), sn = esc(name), skey = esc(key);
+      const mode = storageMode[key] || "h24";
+      const modeBtn = m => `<button class="chip-btn ${mode === m ? "active" : ""}" data-mode="${m}" data-key="${skey}">${m === "h24" ? "24 h" : m === "d7" ? "7 d" : "months"}</button>`;
+      return `<div class="stcard${gone ? " gone" : ""}">
+        <div class="sthead">
+          <span class="stname">${sn}</span>
+          <span class="cont">${sname}</span>
+          ${gone ? `<span class="stgone" title="no longer visible — data kept until you delete it">⚠️ missing</span>` : ""}
+          <span class="stfill ${p > 90 ? "bad" : p > 75 ? "warn" : ""}">${p.toFixed(0)}%</span>
+          <span class="sthint">${fmtBytes(used)} / ${fmtBytes(size)}</span>
+        </div>
+        <div class="stbar"><div class="stbar-fill" style="width:${Math.min(p, 100)}%"></div></div>
+        <div class="stchartbig"><canvas data-k="${skey}" data-s="${mode}"></canvas></div>
+        <div class="stmodes">${modeBtn("h24")}${modeBtn("d7")}${modeBtn("m")}</div>
+        <div class="stactions">
+          <button class="chip-btn ${isRec ? "active" : ""}" data-act="toggle" data-key="${skey}">${isRec ? "⏹ stop recording" : "⏺ record"}</button>
+          ${hasData ? `<button class="chip-btn danger" data-act="delete" data-key="${skey}">🗑️ delete data</button>` : ""}
+        </div>
+      </div>`;
+    }).join("");
+    // Große Linien-Grafik pro Karte (wie die Netzwerk-Charts), Serie je Modus
+    grid.querySelectorAll(".stchartbig canvas").forEach(c => {
+      const key = c.dataset.k, serie = c.dataset.s;
+      const rec = (recorded || {})[key] || {};
+      const points = (serie === "h24" ? rec.h24 : serie === "d7" ? rec.d7 : rec.m) || [];
+      const size = rec.size || ((available || {})[key] || {}).size || 0;
+      const old = Chart.getChart(c);
+      if (old) old.destroy();
+      if (!points || !points.length) return;
+      const labels = points.map(pp => new Date(pp[0] * 1000)
+        .toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }));
+      const data = points.map(pp => size > 0 ? +((pp[1] / size) * 100).toFixed(1) : 0);
+      storageCharts[key + ":" + serie] = new Chart(c, {
+        type: "line",
+        data: { labels, datasets: [{ data, borderColor: "#f59e0b",
+          backgroundColor: "rgba(245,158,11,.12)", fill: true, pointRadius: 0,
+          tension: .25, borderWidth: 2 }] },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false },
+            tooltip: { callbacks: { label: ctx => ctx.parsed.y + " %" } } },
+          scales: {
+            x: { ticks: { color: "rgba(148,163,184,.5)", maxTicksLimit: 6, font: { size: 10 } } },
+            y: { min: 0, max: 100, ticks: { color: "rgba(148,163,184,.5)", maxTicksLimit: 5, font: { size: 10 }, callback: v => v + "%" } }
+          }
+        }
+      });
+    });
+    // Modus-Umschalter (24 h / 7 d / months)
+    grid.querySelectorAll(".stmodes [data-mode]").forEach(b => b.addEventListener("click", () => {
+      storageMode[b.dataset.key] = b.dataset.mode;
+      renderStorage();
+    }));
+    // Karten-Buttons: record / delete
+    grid.querySelectorAll("[data-act]").forEach(b => b.addEventListener("click", () => {
+      storagePost(b.dataset.act, b.dataset.key);
+    }));
+  }
+  // --- Kompakte Liste unten: ALLE Laufwerke ---
+  if (!tbody) return;
+  if (!allKeys.length) {
+    tbody.innerHTML = `<tr><td colspan="5" class="hint">No drives detected yet — agents report storage every 60 s.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = allKeys.map(key => {
     const rec = (recorded || {})[key] || {};
     const av = (available || {})[key] || {};
     const name = rec.name || av.name || key;
     const server = rec.server || av.server || "";
     const size = rec.size || av.size || 0;
     const used = rec.used != null ? rec.used : (av.used || 0);
-    const isRec = (enabled || []).includes(key);
     const p = stPct(size, used);
-    const gone = !av.name;  // Laufwerk nicht mehr sichtbar
+    const gone = !av.name;
+    const isRec = (enabled || []).includes(key);
     const hasData = (rec.h24 && rec.h24.length) || (rec.d7 && rec.d7.length);
-    const sname = esc(server), sn = esc(name), skey = esc(key);
-    const mode = storageMode[key] || "h24";
-    const modeBtn = m => `<button class="chip-btn ${mode === m ? "active" : ""}" data-mode="${m}" data-key="${skey}">${m === "h24" ? "24 h" : m === "d7" ? "7 d" : "months"}</button>`;
-    return `<div class="stcard${gone ? " gone" : ""}">
-      <div class="sthead">
-        <span class="stname">${sn}</span>
-        <span class="cont">${sname}</span>
-        ${gone ? `<span class="stgone" title="no longer visible — data kept until you delete it">⚠️ missing</span>` : ""}
-        <span class="stfill ${p > 90 ? "bad" : p > 75 ? "warn" : ""}">${p.toFixed(0)}%</span>
-        <span class="sthint">${fmtBytes(used)} / ${fmtBytes(size)}</span>
-      </div>
-      <div class="stbar"><div class="stbar-fill" style="width:${Math.min(p, 100)}%"></div></div>
-      <div class="stchartbig"><canvas data-k="${skey}" data-s="${mode}"></canvas></div>
-      <div class="stmodes">${modeBtn("h24")}${modeBtn("d7")}${modeBtn("m")}</div>
-      <div class="stactions">
-        <button class="chip-btn ${isRec ? "active" : ""}" data-act="toggle" data-key="${skey}">${isRec ? "⏹ stop recording" : "⏺ record"}</button>
-        ${hasData ? `<button class="chip-btn danger" data-act="delete" data-key="${skey}">🗑️ delete data</button>` : ""}
-      </div>
-    </div>`;
+    const pctStyle = p > 90 ? "color:#f87171" : p > 75 ? "color:#fbbf24" : "";
+    return `<tr class="${gone ? "restrow" : ""}">
+      <td class="pname">${esc(name)}${gone ? ` <span class="stgone" title="no longer visible — data kept until you delete it">⚠️</span>` : ""}</td>
+      <td class="srv">${esc(server)}</td>
+      <td class="num" style="${pctStyle}">${p.toFixed(0)}%</td>
+      <td class="num">${fmtBytes(used)} / ${fmtBytes(size)}</td>
+      <td class="num" style="white-space:nowrap">
+        <button class="chip-btn ${isRec ? "active" : ""}" data-act="toggle" data-key="${esc(key)}">${isRec ? "⏹ stop" : "⏺ record"}</button>
+        ${hasData ? `<button class="chip-btn danger" data-act="delete" data-key="${esc(key)}" title="delete data">🗑️</button>` : ""}
+      </td>
+    </tr>`;
   }).join("");
-  // Große Linien-Grafik pro Karte (wie die Netzwerk-Charts), Serie je Modus
-  grid.querySelectorAll(".stchartbig canvas").forEach(c => {
-    const key = c.dataset.k, serie = c.dataset.s;
-    const rec = (recorded || {})[key] || {};
-    const points = (serie === "h24" ? rec.h24 : serie === "d7" ? rec.d7 : rec.m) || [];
-    const size = rec.size || ((available || {})[key] || {}).size || 0;
-    const old = Chart.getChart(c);
-    if (old) old.destroy();
-    if (!points || !points.length) return;
-    const labels = points.map(pp => new Date(pp[0] * 1000)
-      .toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }));
-    const data = points.map(pp => size > 0 ? +((pp[1] / size) * 100).toFixed(1) : 0);
-    storageCharts[key + ":" + serie] = new Chart(c, {
-      type: "line",
-      data: { labels, datasets: [{ data, borderColor: "#f59e0b",
-        backgroundColor: "rgba(245,158,11,.12)", fill: true, pointRadius: 0,
-        tension: .25, borderWidth: 2 }] },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false },
-          tooltip: { callbacks: { label: ctx => ctx.parsed.y + " %" } } },
-        scales: {
-          x: { ticks: { color: "rgba(148,163,184,.5)", maxTicksLimit: 6, font: { size: 10 } } },
-          y: { min: 0, max: 100, ticks: { color: "rgba(148,163,184,.5)", maxTicksLimit: 5, font: { size: 10 }, callback: v => v + "%" } }
-        }
-      }
-    });
-  });
-  // Modus-Umschalter (24 h / 7 d / months)
-  grid.querySelectorAll(".stmodes [data-mode]").forEach(b => b.addEventListener("click", () => {
-    storageMode[b.dataset.key] = b.dataset.mode;
-    renderStorage();
-  }));
-  // Buttons: record / delete
-  grid.querySelectorAll("[data-act]").forEach(b => b.addEventListener("click", async () => {
-    const act = b.dataset.act, key = b.dataset.key;
-    try {
-      const r = await fetch("/api/storage", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: act, key })
-      });
-      if (r.ok) loadStorage();
-    } catch (e) { /* still */ }
+  tbody.querySelectorAll("[data-act]").forEach(b => b.addEventListener("click", () => {
+    storagePost(b.dataset.act, b.dataset.key);
   }));
 }
 

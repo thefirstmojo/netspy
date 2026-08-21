@@ -84,8 +84,17 @@
   </section>
 
   <section id="panel-storage" class="tabpanel hidden">
-    <p class="hint" style="margin:8px 4px">Fill levels of pools/filesystems (logical units, e.g. ZFS pools). Recording is opt-in — enable a drive with the button. Data survives restarts (<code>storage_history.json</code> in <code>/netspy/data</code>); drives that disappear keep their data until you delete it.</p>
+    <p class="hint" style="margin:8px 4px">Fill levels of the host's top-level filesystems/pools. Recording is opt-in — activate a drive in the list below to create its chart. Data survives restarts (<code>storage_history.json</code> in <code>/netspy/data</code>); drives that disappear keep their data until you delete it.</p>
     <div id="storagegrid" class="storagrid"></div>
+    <details class="card" open style="margin-top:12px">
+      <summary>All drives <span class="hint">(activate recording to create a chart)</span></summary>
+      <div class="tablewrap">
+        <table id="storagetable">
+          <thead><tr><th>Name</th><th class="srv">Server</th><th class="num">Fill</th><th class="num">Used / Size</th><th style="width:180px"></th></tr></thead>
+          <tbody id="storagetbody"></tbody>
+        </table>
+      </div>
+    </details>
   </section>
 
   <section id="panel-settings" class="tabpanel hidden">

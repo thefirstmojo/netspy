@@ -976,6 +976,22 @@ class Sampler:
             # zeigt immer den eigenen Container-Mount-Namespace!
             with open("/proc/1/mounts") as f:
                 mounts = [ln.split() for ln in f if ln.strip()]
+            paths = [m[1] for m in mounts if len(m) >= 3]
+            # Nur TOP-LEVEL-Mounts: kein Mount, der tiefer liegt als ein
+            # anderer (Unraid-Container-Volumes wie /mnt/cache/appdata/xyz
+            # sind eigene bind-Mounts — die wollen wir nicht). "/" zählt
+            # nicht als Überordner (Debian-Root wäre sonst Präfix von allem).
+            top = []
+            for m in mounts:
+                if len(m) < 3:
+                    continue
+                path = m[1]
+                deeper = any(p != path and p != "/"
+                             and path.startswith(p.rstrip("/") + "/")
+                             for p in paths)
+                if not deeper:
+                    top.append(m)
+            mounts = top
             seen: set = set()
             for m in mounts:
                 if len(m) < 3:

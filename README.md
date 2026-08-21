@@ -30,9 +30,8 @@ Real-time monitoring of your servers in one dashboard: **per-interface, per-proc
 - Display mode switch: **live** (EMA) or **10 s rolling average** (⚡ / 📊 buttons)
 
 ### 💾 Storage tab
-- Fill levels of logical units (ZFS pools/datasets, Unraid mounts, filesystems) — three line charts per drive: **24 h** (hourly), **7 days** (daily, today live until midnight), **months** (month-end value)
-- Reads the host mounts directly (`/proc/mounts` + `/proc/1/root`, `pid: host` + `SYS_PTRACE` — no extra volumes or tools needed)
-- Recording is **opt-in per drive** (⏺ button) — nothing is written automatically; data survives restarts (`storage_history.json` in `/netspy/data`)
+- Fill levels of the host's **top-level** filesystems/pools (no container-volume subfolders) — compact drive list plus one big line chart per recorded drive: **24 h** (hourly), **7 d** (daily, today live until midnight), **months** (month-end value)
+- Recording is **opt-in per drive** (⏺ in the list) — activating a drive creates its chart; nothing is written automatically; data survives restarts (`storage_history.json` in `/netspy/data`)
 - Drives that disappear keep their data until you delete it (🗑️ button)
 
 ### 🛠️ Settings page
