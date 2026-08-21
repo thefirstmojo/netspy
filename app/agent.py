@@ -972,7 +972,9 @@ class Sampler:
                 "squashfs", "ramfs", "pstore", "binfmt_misc", "configfs",
                 "rpc_pipefs", "nsfs"}
         try:
-            with open(f"{PROC}/mounts") as f:
+            # WICHTIG: /proc/1/mounts (HOST-Mounts, pid:host) — /proc/mounts
+            # zeigt immer den eigenen Container-Mount-Namespace!
+            with open("/proc/1/mounts") as f:
                 mounts = [ln.split() for ln in f if ln.strip()]
             seen: set = set()
             for m in mounts:
