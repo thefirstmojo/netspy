@@ -497,8 +497,8 @@ class StorageStore:
     - h24: stündlicher Wert, max 24 Einträge (24 h)
     - d7:  täglicher Wert — der heutige Eintrag wird live gehalten (60-s-Ticks),
            beim Tageswechsel fixiert; max 7 Einträge
-    - w:   Wochen-Endstand (letzter fixierter Tageswert beim Wochenwechsel),
-           max 260 Einträge (~5 Jahre)
+    - m:   Monats-Endstand (letzter fixierter Tageswert beim Monatswechsel),
+           max 12 Einträge (nur die letzten 12 Monate)
     - Ein Laufwerk, das nicht mehr sichtbar ist, BEHÄLT seine Daten
       (der User löscht sie explizit über die UI).
     - Protokolliert wird NUR, was der User per Toggle aktiviert hat (enabled).
@@ -605,7 +605,7 @@ class StorageStore:
                 if f"{dlt.tm_year}-{dlt.tm_mon:02d}" != month_key:
                     if entry.get("last_month") != month_key:
                         entry.setdefault("m", []).append([now_i, dp[1]])
-                        del entry["m"][:-60]
+                        del entry["m"][:-12]
                         entry["last_month"] = month_key
                     break
 
