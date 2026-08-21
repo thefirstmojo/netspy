@@ -705,30 +705,42 @@ function renderStorage() {
         .toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }));
       const data = points.map(pp => size > 0 ? +((pp[1] / size) * 100).toFixed(1) : 0);
       // Fehlende Historie mit dem aktuellen Wert auffüllen (gestrichelt =
-      // projiziert, KEINE Realdaten) — so ist die Linie sofort sichtbar
+      // projiziert, KEINE Realdaten). Die Linie läuft wie bei den Netzwerk-
+      // Graphen von links (Vergangenheit) bis rechts (jetzt): Lücken VOR den
+      // ersten echten Daten UND NACH dem letzten echten Punkt bis jetzt.
       const nowMs = Date.now();
       const horizon = serie === "h24" ? 24 * 3600 : serie === "d7" ? 7 * 86400 : 360 * 86400;
       const step = serie === "h24" ? 3600 : serie === "d7" ? 86400 : 30 * 86400;
       const curVal = data.length ? data[data.length - 1] : (size > 0 ? +((usedNow / size) * 100).toFixed(1) : 0);
       const firstReal = points.length ? points[0][0] * 1000 : nowMs;
-      const fillLabels = [], fillData = [];
+      const lastReal = points.length ? points[points.length - 1][0] * 1000 : nowMs;
+      const fmtL = t => new Date(t).toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+      const fillVorL = [], fillVorD = [], fillNachL = [], fillNachD = [];
       if (points.length < (horizon / step)) {
         for (let t = nowMs - horizon * 1000; t < firstReal; t += step * 1000) {
-          fillLabels.push(new Date(t).toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }));
-          fillData.push(curVal);
+          fillVorL.push(fmtL(t)); fillVorD.push(curVal);
+        }
+        for (let t = lastReal + step * 1000; t < nowMs; t += step * 1000) {
+          fillNachL.push(fmtL(t)); fillNachD.push(curVal);
         }
       }
+      const nv = fillVorL.length, nr = labels.length, nn = fillNachL.length;
       const datasets = [];
-      if (fillData.length) {
-        datasets.push({ data: fillData, borderColor: "rgba(245,158,11,.35)",
-          backgroundColor: "rgba(245,158,11,.04)", fill: true, pointRadius: 0,
-          tension: .25, borderWidth: 1.5, borderDash: [4, 4] });
+      if (nv) {
+        datasets.push({ data: [...fillVorD, ...Array(nr + nn).fill(null)],
+          borderColor: "rgba(245,158,11,.35)", backgroundColor: "rgba(245,158,11,.04)",
+          fill: true, pointRadius: 0, tension: .25, borderWidth: 1.5, borderDash: [4, 4] });
       }
-      datasets.push({ data, borderColor: "#f59e0b",
-        backgroundColor: "rgba(245,158,11,.12)", fill: true, pointRadius: 0,
-        tension: .25, borderWidth: 2 });
+      datasets.push({ data: [...Array(nv).fill(null), ...data, ...Array(nn).fill(null)],
+        borderColor: "#f59e0b", backgroundColor: "rgba(245,158,11,.12)",
+        fill: true, pointRadius: 0, tension: .25, borderWidth: 2 });
+      if (nn) {
+        datasets.push({ data: [...Array(nv + nr).fill(null), ...fillNachD],
+          borderColor: "rgba(245,158,11,.35)", backgroundColor: "rgba(245,158,11,.04)",
+          fill: true, pointRadius: 0, tension: .25, borderWidth: 1.5, borderDash: [4, 4] });
+      }
       // Y-Achse: full = 0-100%; zoom = Messbereich + Puffer (kleine Änderungen sichtbar)
-      const allVals = [...fillData, ...data].filter(v => v != null && isFinite(v));
+      const allVals = [...fillVorD, ...data, ...fillNachD].filter(v => v != null && isFinite(v));
       let yMin = 0, yMax = 100;
       if (storageScale === "zoom" && allVals.length) {
         const mn = Math.min(...allVals), mx = Math.max(...allVals);
@@ -739,7 +751,7 @@ function renderStorage() {
       }
       storageCharts[key + ":" + serie] = new Chart(c, {
         type: "line",
-        data: { labels: [...fillLabels, ...labels], datasets },
+        data: { labels: [...fillVorL, ...labels, ...fillNachL], datasets },
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: { legend: { display: false },
