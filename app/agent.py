@@ -971,6 +971,16 @@ class Sampler:
                 "securityfs", "debugfs", "tracefs", "bpf", "autofs",
                 "squashfs", "ramfs", "pstore", "binfmt_misc", "configfs",
                 "rpc_pipefs", "nsfs", "rootfs", "efivarfs"}
+        # Standard-Container-Verzeichnisse für Laufwerke: selbst wenn dort
+        # ein Mount liegt (Unraid /mnt=rootfs, TrueNAS /mnt=ZFS-Dataset),
+        # zählt er nie als Laufwerk UND nie als Überordner — sonst schneidet
+        # er alle echten Laufwerke darunter ab (/mnt/TrueNAS, /mnt/disk1 …)
+        container_dirs = {"/mnt", "/media", "/run/media", "/Volumes"}
+
+        def _unesc(s):
+            return (s.replace("\\040", " ").replace("\\011", "\t")
+                     .replace("\\012", "\n").replace("\\134", "\\"))
+
         try:
             # WICHTIG: /proc/1/mounts (HOST-Mounts, pid:host) — /proc/mounts
             # zeigt immer den eigenen Container-Mount-Namespace!
@@ -978,17 +988,22 @@ class Sampler:
                 mounts = [ln.split() for ln in f if ln.strip()]
             # Überordner-Präfixe NUR aus echten Dateisystemen (rootfs/tmpfs
             # wie Unraids /mnt zählen nicht — sonst schneiden sie alles ab)
-            paths = [m[1] for m in mounts if len(m) >= 3 and m[2] not in skip]
-            devs = [m[0] for m in mounts if len(m) >= 3 and m[2] not in skip]
+            paths = [m[1] for m in mounts if len(m) >= 3 and m[2] not in skip
+                     and m[1] not in container_dirs]
+            devs = [m[0] for m in mounts if len(m) >= 3 and m[2] not in skip
+                    and m[1] not in container_dirs]
             # Nur TOP-LEVEL-Mounts: kein Mount, der tiefer liegt als ein
             # anderer (Unraid-Container-Volumes wie /mnt/cache/appdata/xyz
             # sind eigene bind-Mounts — die wollen wir nicht). "/" zählt
             # nicht als Überordner (Debian-Root wäre sonst Präfix von allem).
             # ZUSÄTZLICH: ZFS-Dataset-Hierarchie (TrueNAS boot-pool/ROOT/…/
             # audit ist ein Dataset UNTER boot-pool/ROOT/… — Device-Präfix).
+            # Container-Verzeichnisse (/mnt, /media …) zählen nie als
+            # Überordner — TrueNAS' /mnt ist ein ZFS-Dataset, darunter
+            # liegen die echten Pools (/mnt/TrueNAS, /mnt/TrueNAS2 …).
             top = []
             for m in mounts:
-                if len(m) < 3:
+                if len(m) < 3 or m[1] in container_dirs:
                     continue
                 path, dev = m[1], m[0]
                 deeper = any(p != path and p != "/"
@@ -1008,8 +1023,10 @@ class Sampler:
                 if fstype in skip or path in seen:
                     continue
                 seen.add(path)
+                # Escapes aus /proc/mounts auflösen ("Docker\040SSD" -> "Docker SSD")
+                dev_u, path_u = _unesc(dev), _unesc(path)
                 try:
-                    st = os.statvfs(f"/proc/1/root{path.replace(chr(92)+'040', ' ')}")
+                    st = os.statvfs(f"/proc/1/root{path_u}")
                 except OSError:
                     continue
                 frsize = st.f_frsize or st.f_bsize
@@ -1019,7 +1036,7 @@ class Sampler:
                 used = size - frsize * st.f_bavail
                 if used < 0:
                     used = 0
-                out.append({"name": dev if fstype == "zfs" else path,
+                out.append({"name": dev_u if fstype == "zfs" else path_u,
                             "size": size, "used": used,
                             "free": max(0, size - used), "type": fstype})
         except OSError:
