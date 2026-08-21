@@ -130,7 +130,8 @@ td.srv { color: var(--muted); }
 .chip-btn.active { background: rgba(34,211,238,.12); border-color: var(--rx, #22d3ee); color: var(--rx, #22d3ee); }
 .cpumode { display: inline-flex; gap: 4px; margin-left: 10px; vertical-align: middle; }
 .storagrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; padding: 4px 2px; }
-.stcard { background: var(--card, #0f172a); border: 1px solid var(--border, rgba(148,163,184,.2)); border-radius: 12px; padding: 12px; }
+.stcard { background: var(--card, #0f172a); border: 1px solid var(--border, rgba(148,163,184,.2)); border-radius: 12px; padding: 12px; cursor: grab; }
+.stcard:active { cursor: grabbing; }
 .stcard.gone { border-color: rgba(239,68,68,.35); }
 .sthead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .stname { font-weight: 600; font-size: 14px; }
