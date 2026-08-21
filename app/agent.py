@@ -970,13 +970,15 @@ class Sampler:
                 "shm", "cgroup", "cgroup2", "devpts", "mqueue", "fusectl",
                 "securityfs", "debugfs", "tracefs", "bpf", "autofs",
                 "squashfs", "ramfs", "pstore", "binfmt_misc", "configfs",
-                "rpc_pipefs", "nsfs"}
+                "rpc_pipefs", "nsfs", "rootfs"}
         try:
             # WICHTIG: /proc/1/mounts (HOST-Mounts, pid:host) — /proc/mounts
             # zeigt immer den eigenen Container-Mount-Namespace!
             with open("/proc/1/mounts") as f:
                 mounts = [ln.split() for ln in f if ln.strip()]
-            paths = [m[1] for m in mounts if len(m) >= 3]
+            # Überordner-Präfixe NUR aus echten Dateisystemen (rootfs/tmpfs
+            # wie Unraids /mnt zählen nicht — sonst schneiden sie alles ab)
+            paths = [m[1] for m in mounts if len(m) >= 3 and m[2] not in skip]
             # Nur TOP-LEVEL-Mounts: kein Mount, der tiefer liegt als ein
             # anderer (Unraid-Container-Volumes wie /mnt/cache/appdata/xyz
             # sind eigene bind-Mounts — die wollen wir nicht). "/" zählt

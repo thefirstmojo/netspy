@@ -602,6 +602,7 @@ let storageData = null;
 let lastStorageLoad = 0;
 let storageCharts = {};  // key:serie -> Chart (für sauberes destroy beim Re-Render)
 let storageMode = {};    // key -> "h24" | "d7" | "m" (gewählter Zeitbereich je Karte)
+let storageScale = "full";  // "full" (0-100%) | "zoom" (Messbereich)
 
 function stPct(size, used) { return size > 0 ? (used / size) * 100 : 0; }
 
@@ -660,6 +661,8 @@ function renderStorage() {
       const gone = !av.name;
       const isRec = true;  // Karten zeigen nur enabled Laufwerke
       const hasData = (rec.h24 && rec.h24.length) || (rec.d7 && rec.d7.length);
+      // Auffüll-Markierung: gestrichelte Linie wenn (noch) keine Realdaten
+      const filled = !((rec.h24 && rec.h24.length) || (rec.d7 && rec.d7.length) || (rec.m && rec.m.length));
       const sname = esc(server), sn = esc(name), skey = esc(key);
       const mode = storageMode[key] || "h24";
       const modeBtn = m => `<button class="chip-btn ${mode === m ? "active" : ""}" data-mode="${m}" data-key="${skey}">${m === "h24" ? "24 h" : m === "d7" ? "7 d" : "months"}</button>`;
@@ -668,6 +671,7 @@ function renderStorage() {
           <span class="stname">${sn}</span>
           <span class="cont">${sname}</span>
           ${gone ? `<span class="stgone" title="no longer visible — data kept until you delete it">⚠️ missing</span>` : ""}
+          ${filled ? `<span class="stgone" title="no history yet — dashed line is the current value projected, not real data">⏳ estimated</span>` : ""}
           <span class="stfill ${p > 90 ? "bad" : p > 75 ? "warn" : ""}">${p.toFixed(0)}%</span>
           <span class="sthint">${fmtBytes(used)} / ${fmtBytes(size)}</span>
         </div>
@@ -686,24 +690,56 @@ function renderStorage() {
       const rec = (recorded || {})[key] || {};
       const points = (serie === "h24" ? rec.h24 : serie === "d7" ? rec.d7 : rec.m) || [];
       const size = rec.size || ((available || {})[key] || {}).size || 0;
+      const usedNow = (rec.used != null ? rec.used : ((available || {})[key] || {}).used) || 0;
       const old = Chart.getChart(c);
       if (old) old.destroy();
-      if (!points || !points.length) return;
+      if (!size) return;  // ohne Größe keine sinnvolle Chart
       const labels = points.map(pp => new Date(pp[0] * 1000)
         .toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }));
       const data = points.map(pp => size > 0 ? +((pp[1] / size) * 100).toFixed(1) : 0);
+      // Fehlende Historie mit dem aktuellen Wert auffüllen (gestrichelt =
+      // projiziert, KEINE Realdaten) — so ist die Linie sofort sichtbar
+      const nowMs = Date.now();
+      const horizon = serie === "h24" ? 24 * 3600 : serie === "d7" ? 7 * 86400 : 360 * 86400;
+      const step = serie === "h24" ? 3600 : serie === "d7" ? 86400 : 30 * 86400;
+      const curVal = data.length ? data[data.length - 1] : (size > 0 ? +((usedNow / size) * 100).toFixed(1) : 0);
+      const firstReal = points.length ? points[0][0] * 1000 : nowMs;
+      const fillLabels = [], fillData = [];
+      if (points.length < (horizon / step)) {
+        for (let t = nowMs - horizon * 1000; t < firstReal; t += step * 1000) {
+          fillLabels.push(new Date(t).toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }));
+          fillData.push(curVal);
+        }
+      }
+      const datasets = [];
+      if (fillData.length) {
+        datasets.push({ data: fillData, borderColor: "rgba(245,158,11,.35)",
+          backgroundColor: "rgba(245,158,11,.04)", fill: true, pointRadius: 0,
+          tension: .25, borderWidth: 1.5, borderDash: [4, 4] });
+      }
+      datasets.push({ data, borderColor: "#f59e0b",
+        backgroundColor: "rgba(245,158,11,.12)", fill: true, pointRadius: 0,
+        tension: .25, borderWidth: 2 });
+      // Y-Achse: full = 0-100%; zoom = Messbereich + Puffer (kleine Änderungen sichtbar)
+      const allVals = [...fillData, ...data].filter(v => v != null && isFinite(v));
+      let yMin = 0, yMax = 100;
+      if (storageScale === "zoom" && allVals.length) {
+        const mn = Math.min(...allVals), mx = Math.max(...allVals);
+        const pad = Math.max((mx - mn) * 0.2, 1);
+        yMin = Math.max(0, Math.floor(mn - pad));
+        yMax = Math.ceil(mx + pad);
+        if (yMax - yMin < 2) yMax = yMin + 2;
+      }
       storageCharts[key + ":" + serie] = new Chart(c, {
         type: "line",
-        data: { labels, datasets: [{ data, borderColor: "#f59e0b",
-          backgroundColor: "rgba(245,158,11,.12)", fill: true, pointRadius: 0,
-          tension: .25, borderWidth: 2 }] },
+        data: { labels: [...fillLabels, ...labels], datasets },
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: { legend: { display: false },
             tooltip: { callbacks: { label: ctx => ctx.parsed.y + " %" } } },
           scales: {
             x: { ticks: { color: "rgba(148,163,184,.5)", maxTicksLimit: 6, font: { size: 10 } } },
-            y: { min: 0, max: 100, ticks: { color: "rgba(148,163,184,.5)", maxTicksLimit: 5, font: { size: 10 }, callback: v => v + "%" } }
+            y: { min: yMin, max: yMax, ticks: { color: "rgba(148,163,184,.5)", maxTicksLimit: 5, font: { size: 10 }, callback: v => v + "%" } }
           }
         }
       });
@@ -998,6 +1034,16 @@ function setDiskMode(mode) {
 }
 document.getElementById("diskmode-live").addEventListener("click", () => setDiskMode("live"));
 document.getElementById("diskmode-avg10").addEventListener("click", () => setDiskMode("avg10"));
+
+function setStorageScale(mode) {
+  storageScale = mode;
+  const f = document.getElementById("stscale-full"), z = document.getElementById("stscale-zoom");
+  if (f) f.classList.toggle("active", mode === "full");
+  if (z) z.classList.toggle("active", mode === "zoom");
+  renderStorage();
+}
+document.getElementById("stscale-full").addEventListener("click", () => setStorageScale("full"));
+document.getElementById("stscale-zoom").addEventListener("click", () => setStorageScale("zoom"));
 
 /* Tab-Umschaltung: Network / Disk / CPU-RAM / Storage / Settings */
 document.getElementById("tabbtn-net").addEventListener("click", () => setTab("net"));

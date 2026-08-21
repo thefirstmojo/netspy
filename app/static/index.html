@@ -85,6 +85,13 @@
 
   <section id="panel-storage" class="tabpanel hidden">
     <p class="hint" style="margin:8px 4px">Fill levels of the host's top-level filesystems/pools. Recording is opt-in — activate a drive in the list below to create its chart. Data survives restarts (<code>storage_history.json</code> in <code>/netspy/data</code>); drives that disappear keep their data until you delete it.</p>
+    <div style="display:flex;align-items:center;gap:8px;margin:4px 2px 8px">
+      <span class="hint">Y-axis:</span>
+      <span class="cpumode" title="Y-axis scale of the charts">
+        <button id="stscale-full" class="chip-btn active" title="Full scale 0-100%">0–100%</button>
+        <button id="stscale-zoom" class="chip-btn" title="Zoom to the measured range (small changes become visible)">zoom</button>
+      </span>
+    </div>
     <div id="storagegrid" class="storagrid"></div>
     <details class="card" open style="margin-top:12px">
       <summary>All drives <span class="hint">(activate recording to create a chart)</span></summary>
