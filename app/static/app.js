@@ -797,29 +797,21 @@ function renderStorage() {
       storagePost(b.dataset.act, b.dataset.key);
     }));
   }
-  // --- Dateibrowser: alle Ebenen ausklappbar (▸/▾), wie ein File-Browser ---
-  if (!tbody) return;
+  // --- Dateibrowser: eigener Baum pro Server, alles anfangs eingeklappt ---
+  const treeEl = document.getElementById("storagetree");
+  if (!treeEl) return;
   if (!allKeys.length) {
-    tbody.innerHTML = `<tr><td colspan="5" class="hint">No drives detected yet — agents report storage every 60 s.</td></tr>`;
+    treeEl.innerHTML = `<p class="hint">No drives detected yet — agents report storage every 60 s.</p>`;
     return;
   }
   let stExpanded = [];
   try { stExpanded = JSON.parse(localStorage.getItem("netspy.storageExpanded") || "[]"); } catch (e) { /* still */ }
-  const expSet = new Set(stExpanded);
-  if (!stExpanded.length) {
-    // Erstbesuch: oberste Ebene sichtbar — Roots UND Container-Ordner
-    // (/mnt) sind aufgeklappt, damit man die Hauptlaufwerke SOFORT sieht
-    // (TrueNAS: / -> /mnt -> Pools)
-    const cntDirs = ["/mnt", "/media", "/run/media", "/Volumes"];
-    allKeys.forEach(k => {
-      const a = (available || {})[k] || {};
-      if ((a.level || 0) === 0 || cntDirs.includes(a.path || k)) expSet.add(k);
-    });
-  }
-  // Kinder eines Knotens: alle Einträge, deren parent == dessen Pfad ist.
-  // Ohne parent-Feld (alter Agent) hängt alles am Root → flache Liste.
-  const stKidsOf = path => allKeys
-    .filter(k => (((available || {})[k] || {}).parent || null) === (path || null))
+  const expSet = new Set(stExpanded);   // Startzustand: alles zugeklappt
+  // Server ermitteln (aus available + recorded), stabil alphabetisch sortiert
+  const srvNames = [...new Set(allKeys.map(k => k.includes(":") ? k.split(":")[0] : "(unknown)"))].sort();
+  // Kinder eines Knotens NUR im eigenen Server-Baum (parent = Pfad des Knotens)
+  const stKidsOf = (server, path) => allKeys
+    .filter(k => k.startsWith(server + ":") && (((available || {})[k] || {}).parent || null) === (path || null))
     .sort((a, b) => (((available || {})[a] || {}).name || a).localeCompare(((available || {})[b] || {}).name || b));
   // Label: letzter Pfadteil (Ordner-Name); bei "/" der Device-Name (z. B. boot-pool)
   const stLabel = k => {
@@ -828,22 +820,21 @@ function renderStorage() {
     if (p === "/") return av.name || k;
     return p.split("/").filter(Boolean).pop() || p;
   };
-  const stRows = (path, depth) => {
-    const kids = stKidsOf(path);
+  const stRows = (server, path, depth) => {
+    const kids = stKidsOf(server, path);
     if (!kids.length) return "";
     let html = "";
     for (const k of kids) {
       const rec = (recorded || {})[k] || {};
       const av = (available || {})[k] || {};
       const name = rec.name || av.name || k;
-      const server = rec.server || av.server || "";
       const size = rec.size || av.size || 0;
       const used = rec.used != null ? rec.used : (av.used || 0);
       const p = stPct(size, used);
       const gone = !av.name;
       const isRec = (enabled || []).includes(k);
       const hasData = (rec.h24 && rec.h24.length) || (rec.d7 && rec.d7.length);
-      const hasKids = stKidsOf(av.path || k).length > 0;
+      const hasKids = stKidsOf(server, av.path || k).length > 0;
       const open = expSet.has(k);
       const pctStyle = p > 90 ? "color:#f87171" : p > 75 ? "color:#fbbf24" : "";
       const tw = hasKids
@@ -855,7 +846,6 @@ function renderStorage() {
           ${av.type === "zfs" && (av.path || k) !== "/" && name !== stLabel(k) ? ` <span class="stsub" title="${esc(name)}">${esc(name.split("/").slice(0, -1).join("/"))}</span>` : ""}
           ${gone ? ` <span class="stgone" title="no longer visible — data kept until you delete it">⚠️</span>` : ""}
         </td>
-        <td class="srv">${esc(server)}</td>
         <td class="num" style="${pctStyle}">${p.toFixed(0)}%</td>
         <td class="num">${fmtBytes(used)} / ${fmtBytes(size)}</td>
         <td class="num" style="white-space:nowrap">
@@ -863,20 +853,34 @@ function renderStorage() {
           ${hasData ? `<button class="chip-btn danger" data-act="delete" data-key="${esc(k)}" title="delete data">🗑️</button>` : ""}
         </td>
       </tr>`;
-      if (open) html += stRows(av.path || k, depth + 1);
+      if (open) html += stRows(server, av.path || k, depth + 1);
     }
     return html;
   };
-  tbody.innerHTML = stRows(null, 0);
-  // Ausklappen / Einklappen
-  tbody.querySelectorAll("[data-tw]").forEach(sp => sp.addEventListener("click", () => {
+  treeEl.innerHTML = srvNames.map(srv => {
+    const noHost = (host_access || {})[srv] === false;
+    const cnt = allKeys.filter(k => k.startsWith(srv + ":")).length;
+    const body = stRows(srv, null, 0) || `<tr><td colspan="4" class="hint">No drives found.</td></tr>`;
+    return `<details class="stsec" open>
+      <summary>🖥️ <b>${esc(srv)}</b> <span class="hint">(${cnt} entr${cnt === 1 ? "y" : "ies"}${noHost ? " · ⚠️ no host access" : ""})</span></summary>
+      ${noHost ? `<p class="hint" style="color:#fbbf24">⚠️ <b>No host access</b> — the container cannot read this server's mounts. It must run with <code>--pid=host</code> (host PID namespace).</p>` : ""}
+      <div class="tablewrap">
+        <table class="sttable">
+          <thead><tr><th>Name</th><th class="num">Fill</th><th class="num">Used / Size</th><th style="width:180px"></th></tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+    </details>`;
+  }).join("");
+  // Ausklappen / Einklappen (Server-übergreifend, pro Key)
+  treeEl.querySelectorAll("[data-tw]").forEach(sp => sp.addEventListener("click", () => {
     const k = sp.dataset.tw;
     if (expSet.has(k)) expSet.delete(k); else expSet.add(k);
     try { localStorage.setItem("netspy.storageExpanded", JSON.stringify([...expSet])); } catch (e) { /* still */ }
     renderStorage();
   }));
   // Buttons: record / delete (auch auf tiefen Ebenen)
-  tbody.querySelectorAll("[data-act]").forEach(b => b.addEventListener("click", () => {
+  treeEl.querySelectorAll("[data-act]").forEach(b => b.addEventListener("click", () => {
     storagePost(b.dataset.act, b.dataset.key);
   }));
 }

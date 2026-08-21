@@ -214,6 +214,12 @@ details.card[open] summary { color: var(--text); }
 
 footer { color: var(--muted); font-size: 11px; text-align: center; padding: 12px 0 24px; }
 
+/* Storage-Dateibrowser: eine Sektion pro Server */
+.stsec { margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px 8px; background: var(--card); }
+.stsec summary { cursor: pointer; font-weight: 600; color: var(--muted); padding: 6px 0 2px; }
+.stsec[open] summary { color: var(--text); }
+.stsec .tablewrap { margin-top: 4px; }
+
 @media (max-width: 700px) {
   .chartgrid { grid-template-columns: 1fr; }
   .statusbar { margin-left: 0; }
