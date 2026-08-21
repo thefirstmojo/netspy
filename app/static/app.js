@@ -624,12 +624,15 @@ async function loadStorage() {
 function renderStorage() {
   const grid = document.getElementById("storagegrid");
   if (!grid || !storageData) return;
-  const { enabled, recorded, available } = storageData;
+  const { enabled, recorded, available, host_access } = storageData;
   const keys = [...new Set([...Object.keys(recorded || {}), ...Object.keys(available || {})])].sort();
+  const noHost = !keys.length && host_access && Object.values(host_access).some(v => v === false);
   if (!keys.length) {
     Object.values(storageCharts).forEach(ch => { try { ch.destroy(); } catch (e) { /* still */ } });
     storageCharts = {};
-    grid.innerHTML = `<p class="hint">No pools/filesystems detected yet — agents report storage (zpool / df) every 60 s.</p>`;
+    grid.innerHTML = noHost
+      ? `<p class="hint" style="color:#fbbf24">⚠️ <b>No host access</b> — the container cannot read the host mounts. It must run with <code>--pid=host</code> (host PID namespace): in Unraid go to <b>Docker → NetSpy → Edit → Apply</b> (or <b>Reinstall</b>) so the change takes effect.</p>`
+      : `<p class="hint">No pools/filesystems detected yet — agents report storage every 60 s.</p>`;
     return;
   }
   // Alte Chart-Instanzen sauber zerstören (Canvas werden gleich ersetzt)

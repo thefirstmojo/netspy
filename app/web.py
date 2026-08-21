@@ -672,6 +672,10 @@ class WebHandler(BaseHTTPRequestHandler):
                 "enabled": enabled,
                 "recorded": recorded,
                 "available": store.available_map(mon.servers, mon.snaps),
+                "host_access": {
+                    s["name"]: bool((mon.snaps.get(s["name"]) or {}).get("storage_host", True))
+                    for s in mon.servers
+                },
             }).encode()
             self._send_bytes(200, body, "application/json")
             return

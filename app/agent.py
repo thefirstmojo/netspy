@@ -202,6 +202,7 @@ class Sampler:
         self._disk_active: dict = {}  # name -> monotonic timestamp
         self._disk_cont: dict = {}   # name -> container (persistent, kein Flackern)
         self._storage_cache: dict = {"ts": 0.0, "data": []}  # 60-s-Cache
+        self._storage_host: bool = True  # /proc/1/root = Host-Root?
 
         # CPU/RAM pro Prozess (/proc/stat + /proc/<pid>/stat)
         self._cpu_tot_prev: tuple | None = None  # (cpu_total, cpu_idle) kumulativ
@@ -924,6 +925,7 @@ class Sampler:
                 "disk": disk_list,
                 "system": system,
                 "storage": storage,
+                "storage_host": self._storage_host,
                 "ss_error": self._ss_error,
                 "ss_ok": ss is not None,
                 # Diagnose: pid1 != Container-Init -> pid:host aktiv
@@ -952,6 +954,18 @@ class Sampler:
         if mono - self._storage_cache["ts"] < 60:
             return self._storage_cache["data"]
         out: list = []
+        # Host-Zugriff prüfen: /proc/1/root darf NICHT das Container-Root sein
+        # (ohne pid:host wäre /proc/1 der Container-Init -> Container-Mounts ->
+        # Werte-Müll wie /etc/hosts mit dem Root-Overlay-FS)
+        self._storage_host = False
+        try:
+            self._storage_host = (os.stat("/proc/1/root/").st_dev
+                                  != os.stat("/").st_dev)
+        except OSError:
+            pass
+        if not self._storage_host:
+            self._storage_cache = {"ts": mono, "data": []}
+            return []
         skip = {"tmpfs", "overlay", "proc", "sysfs", "devtmpfs", "udev",
                 "shm", "cgroup", "cgroup2", "devpts", "mqueue", "fusectl",
                 "securityfs", "debugfs", "tracefs", "bpf", "autofs",
@@ -986,27 +1000,7 @@ class Sampler:
             pass
         if not out:
             # Fallback: Container-eigene Mounts (ohne pid:host) — df -Pk
-            try:
-                r = subprocess.run(["df", "-Pk"], capture_output=True,
-                                   text=True, timeout=5)
-                for line in r.stdout.strip().splitlines()[1:]:
-                    p = line.split()
-                    if len(p) < 6:
-                        continue
-                    if any(x in p[0] for x in ("tmpfs", "overlay", "proc",
-                                               "sysfs", "devtmpfs", "shm",
-                                               "udev")):
-                        continue
-                    try:
-                        total = int(p[1]) * 1024; used = int(p[2]) * 1024
-                    except ValueError:
-                        continue
-                    if total > 0:
-                        out.append({"name": f"{p[0]} ({p[5]})", "size": total,
-                                    "used": used, "free": total - used,
-                                    "type": "fs"})
-            except Exception:
-                pass
+            pass  # bewusst leer: Container-Mounts sind kein sinnvoller Füllstand
         self._storage_cache = {"ts": mono, "data": out}
         return out
 
