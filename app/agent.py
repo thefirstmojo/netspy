@@ -970,7 +970,7 @@ class Sampler:
                 "shm", "cgroup", "cgroup2", "devpts", "mqueue", "fusectl",
                 "securityfs", "debugfs", "tracefs", "bpf", "autofs",
                 "squashfs", "ramfs", "pstore", "binfmt_misc", "configfs",
-                "rpc_pipefs", "nsfs", "rootfs"}
+                "rpc_pipefs", "nsfs", "rootfs", "efivarfs"}
         try:
             # WICHTIG: /proc/1/mounts (HOST-Mounts, pid:host) — /proc/mounts
             # zeigt immer den eigenen Container-Mount-Namespace!
@@ -979,19 +979,25 @@ class Sampler:
             # Überordner-Präfixe NUR aus echten Dateisystemen (rootfs/tmpfs
             # wie Unraids /mnt zählen nicht — sonst schneiden sie alles ab)
             paths = [m[1] for m in mounts if len(m) >= 3 and m[2] not in skip]
+            devs = [m[0] for m in mounts if len(m) >= 3 and m[2] not in skip]
             # Nur TOP-LEVEL-Mounts: kein Mount, der tiefer liegt als ein
             # anderer (Unraid-Container-Volumes wie /mnt/cache/appdata/xyz
             # sind eigene bind-Mounts — die wollen wir nicht). "/" zählt
             # nicht als Überordner (Debian-Root wäre sonst Präfix von allem).
+            # ZUSÄTZLICH: ZFS-Dataset-Hierarchie (TrueNAS boot-pool/ROOT/…/
+            # audit ist ein Dataset UNTER boot-pool/ROOT/… — Device-Präfix).
             top = []
             for m in mounts:
                 if len(m) < 3:
                     continue
-                path = m[1]
+                path, dev = m[1], m[0]
                 deeper = any(p != path and p != "/"
                              and path.startswith(p.rstrip("/") + "/")
                              for p in paths)
-                if not deeper:
+                deeper_dev = any(d != dev
+                                 and dev.startswith(d.rstrip("/") + "/")
+                                 for d in devs)
+                if not deeper and not deeper_dev:
                     top.append(m)
             mounts = top
             seen: set = set()

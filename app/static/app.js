@@ -603,6 +603,8 @@ let lastStorageLoad = 0;
 let storageCharts = {};  // key:serie -> Chart (für sauberes destroy beim Re-Render)
 let storageMode = {};    // key -> "h24" | "d7" | "m" (gewählter Zeitbereich je Karte)
 let storageScale = "full";  // "full" (0-100%) | "zoom" (Messbereich)
+let storageOrder = [];   // Karten-Reihenfolge (Drag & Drop, localStorage)
+try { storageOrder = JSON.parse(localStorage.getItem("netspy.storageOrder") || "[]"); } catch (e) { storageOrder = []; }
 
 function stPct(size, used) { return size > 0 ? (used / size) * 100 : 0; }
 
@@ -641,6 +643,11 @@ function renderStorage() {
   const { enabled, recorded, available, host_access } = storageData;
   const allKeys = [...new Set([...Object.keys(recorded || {}), ...Object.keys(available || {})])].sort();
   const enabledKeys = allKeys.filter(k => (enabled || []).includes(k));
+  // Gespeicherte Drag&Drop-Reihenfolge anwenden (unbekannte Keys ans Ende)
+  const orderedKeys = [...enabledKeys].sort((a, b) => {
+    const ia = storageOrder.indexOf(a), ib = storageOrder.indexOf(b);
+    return (ia === -1 ? 9999 : ia) - (ib === -1 ? 9999 : ib);
+  });
   const noHost = !allKeys.length && host_access && Object.values(host_access).some(v => v === false);
   // --- Karten oben: NUR aktivierte (recording) Laufwerke ---
   Object.values(storageCharts).forEach(ch => { try { ch.destroy(); } catch (e) { /* still */ } });
@@ -650,7 +657,7 @@ function renderStorage() {
       ? `<p class="hint" style="color:#fbbf24">⚠️ <b>No host access</b> — the container cannot read the host mounts. It must run with <code>--pid=host</code> (host PID namespace): in Unraid go to <b>Docker → NetSpy → Edit → Apply</b> (or <b>Reinstall</b>) so the change takes effect.</p>`
       : `<p class="hint">No drives recording — activate one in the list below.</p>`;
   } else {
-    grid.innerHTML = enabledKeys.map(key => {
+    grid.innerHTML = orderedKeys.map(key => {
       const rec = (recorded || {})[key] || {};
       const av = (available || {})[key] || {};
       const name = rec.name || av.name || key;
@@ -666,7 +673,7 @@ function renderStorage() {
       const sname = esc(server), sn = esc(name), skey = esc(key);
       const mode = storageMode[key] || "h24";
       const modeBtn = m => `<button class="chip-btn ${mode === m ? "active" : ""}" data-mode="${m}" data-key="${skey}">${m === "h24" ? "24 h" : m === "d7" ? "7 d" : "months"}</button>`;
-      return `<div class="stcard${gone ? " gone" : ""}">
+      return `<div class="stcard${gone ? " gone" : ""}" data-key="${skey}" draggable="true" title="drag to reorder">
         <div class="sthead">
           <span class="stname">${sn}</span>
           <span class="cont">${sname}</span>
@@ -749,6 +756,30 @@ function renderStorage() {
       storageMode[b.dataset.key] = b.dataset.mode;
       renderStorage();
     }));
+    // Drag & Drop: Karten umsortieren (Reihenfolge in localStorage)
+    let dragKey = null;
+    grid.querySelectorAll(".stcard").forEach(card => {
+      card.addEventListener("dragstart", e => {
+        dragKey = card.dataset.key;
+        e.dataTransfer.effectAllowed = "move";
+        card.style.opacity = ".5";
+      });
+      card.addEventListener("dragend", () => { card.style.opacity = ""; });
+      card.addEventListener("dragover", e => e.preventDefault());
+      card.addEventListener("drop", e => {
+        e.preventDefault();
+        const targetKey = card.dataset.key;
+        if (!dragKey || dragKey === targetKey) return;
+        // Aktuelle Anzeige-Reihenfolge als Basis (nicht nur gespeicherte)
+        const current = [...grid.querySelectorAll(".stcard")].map(c => c.dataset.key);
+        const list = current.filter(k => k !== dragKey);
+        const to = Math.max(0, list.indexOf(targetKey));
+        list.splice(to, 0, dragKey);
+        storageOrder = list;
+        try { localStorage.setItem("netspy.storageOrder", JSON.stringify(storageOrder)); } catch (err) { /* still */ }
+        renderStorage();
+      });
+    });
     // Karten-Buttons: record / delete
     grid.querySelectorAll("[data-act]").forEach(b => b.addEventListener("click", () => {
       storagePost(b.dataset.act, b.dataset.key);
