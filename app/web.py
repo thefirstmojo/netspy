@@ -622,6 +622,10 @@ class StorageStore:
                     "name": st["name"], "server": s["name"],
                     "type": st.get("type", ""),
                     "size": st["size"], "used": st["used"],
+                    # Dateibrowser-Hierarchie (falls der Agent sie liefert)
+                    "path": st.get("path", st["name"]),
+                    "parent": st.get("parent"),
+                    "level": st.get("level", 0),
                 }
         return out
 
