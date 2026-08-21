@@ -985,44 +985,40 @@ class Sampler:
             # WICHTIG: /proc/1/mounts (HOST-Mounts, pid:host) — /proc/mounts
             # zeigt immer den eigenen Container-Mount-Namespace!
             with open("/proc/1/mounts") as f:
-                mounts = [ln.split() for ln in f if ln.strip()]
-            # Überordner-Präfixe NUR aus echten Dateisystemen (rootfs/tmpfs
-            # wie Unraids /mnt zählen nicht — sonst schneiden sie alles ab)
-            paths = [m[1] for m in mounts if len(m) >= 3 and m[2] not in skip
-                     and m[1] not in container_dirs]
-            devs = [m[0] for m in mounts if len(m) >= 3 and m[2] not in skip
-                    and m[1] not in container_dirs]
-            # Nur TOP-LEVEL-Mounts: kein Mount, der tiefer liegt als ein
-            # anderer (Unraid-Container-Volumes wie /mnt/cache/appdata/xyz
-            # sind eigene bind-Mounts — die wollen wir nicht). "/" zählt
-            # nicht als Überordner (Debian-Root wäre sonst Präfix von allem).
-            # ZUSÄTZLICH: ZFS-Dataset-Hierarchie (TrueNAS boot-pool/ROOT/…/
-            # audit ist ein Dataset UNTER boot-pool/ROOT/… — Device-Präfix).
-            # Container-Verzeichnisse (/mnt, /media …) zählen nie als
-            # Überordner — TrueNAS' /mnt ist ein ZFS-Dataset, darunter
-            # liegen die echten Pools (/mnt/TrueNAS, /mnt/TrueNAS2 …).
-            top = []
+                lines = [ln for ln in f if ln.strip()]
+            # --- Alle echten Mounts mit Hierarchie sammeln (Dateibrowser) ---
+            # KEIN Top-Level-Filter mehr: der Browser zeigt alle Ebenen und
+            # klappt sie aus (▸/▾). Pseudo-FS + Container-Verzeichnisse raus.
+            mounts = []
+            seen_paths: set = set()
+            for ln in lines:
+                fld = ln.split()
+                if len(fld) < 3:
+                    continue
+                dev, path, fstype = fld[0], fld[1], fld[2]
+                if fstype in skip or path in container_dirs or path in seen_paths:
+                    continue
+                seen_paths.add(path)
+                mounts.append([dev, path, fstype])
+            # parent: der längste echte Präfix-Mount ("/" zählt als Überordner
+            # — so kann man sich vom Root aus in alle Ebenen graben)
+            paths = [m[1] for m in mounts]
+            parent_of = {}
             for m in mounts:
-                if len(m) < 3 or m[1] in container_dirs:
-                    continue
-                path, dev = m[1], m[0]
-                deeper = any(p != path and p != "/"
-                             and path.startswith(p.rstrip("/") + "/")
-                             for p in paths)
-                deeper_dev = any(d != dev
-                                 and dev.startswith(d.rstrip("/") + "/")
-                                 for d in devs)
-                if not deeper and not deeper_dev:
-                    top.append(m)
-            mounts = top
-            seen: set = set()
+                p = m[1]
+                cands = [q for q in paths if q != p and p.startswith(q.rstrip("/") + "/")]
+                parent_of[p] = max(cands, key=len) if cands else None
+            level_of = {}
             for m in mounts:
-                if len(m) < 3:
-                    continue
-                dev, path, fstype = m[0], m[1], m[2]
-                if fstype in skip or path in seen:
-                    continue
-                seen.add(path)
+                p = m[1]
+                lv = 0
+                pp = parent_of[p]
+                while pp:
+                    lv += 1
+                    pp = parent_of.get(pp)
+                level_of[p] = lv
+            for m in mounts:
+                dev, path, fstype = m
                 # Escapes aus /proc/mounts auflösen ("Docker\040SSD" -> "Docker SSD")
                 dev_u, path_u = _unesc(dev), _unesc(path)
                 try:
@@ -1037,8 +1033,10 @@ class Sampler:
                 if used < 0:
                     used = 0
                 out.append({"name": dev_u if fstype == "zfs" else path_u,
+                            "path": path_u,
                             "size": size, "used": used,
-                            "free": max(0, size - used), "type": fstype})
+                            "free": max(0, size - used), "type": fstype,
+                            "parent": parent_of[path], "level": level_of[path]})
         except OSError:
             pass
         if not out:

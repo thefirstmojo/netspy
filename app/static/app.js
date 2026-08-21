@@ -797,35 +797,80 @@ function renderStorage() {
       storagePost(b.dataset.act, b.dataset.key);
     }));
   }
-  // --- Kompakte Liste unten: ALLE Laufwerke ---
+  // --- Dateibrowser: alle Ebenen ausklappbar (▸/▾), wie ein File-Browser ---
   if (!tbody) return;
   if (!allKeys.length) {
     tbody.innerHTML = `<tr><td colspan="5" class="hint">No drives detected yet — agents report storage every 60 s.</td></tr>`;
     return;
   }
-  tbody.innerHTML = allKeys.map(key => {
-    const rec = (recorded || {})[key] || {};
-    const av = (available || {})[key] || {};
-    const name = rec.name || av.name || key;
-    const server = rec.server || av.server || "";
-    const size = rec.size || av.size || 0;
-    const used = rec.used != null ? rec.used : (av.used || 0);
-    const p = stPct(size, used);
-    const gone = !av.name;
-    const isRec = (enabled || []).includes(key);
-    const hasData = (rec.h24 && rec.h24.length) || (rec.d7 && rec.d7.length);
-    const pctStyle = p > 90 ? "color:#f87171" : p > 75 ? "color:#fbbf24" : "";
-    return `<tr class="${gone ? "restrow" : ""}">
-      <td class="pname">${esc(name)}${gone ? ` <span class="stgone" title="no longer visible — data kept until you delete it">⚠️</span>` : ""}</td>
-      <td class="srv">${esc(server)}</td>
-      <td class="num" style="${pctStyle}">${p.toFixed(0)}%</td>
-      <td class="num">${fmtBytes(used)} / ${fmtBytes(size)}</td>
-      <td class="num" style="white-space:nowrap">
-        <button class="chip-btn ${isRec ? "active" : ""}" data-act="toggle" data-key="${esc(key)}">${isRec ? "⏹ stop" : "⏺ record"}</button>
-        ${hasData ? `<button class="chip-btn danger" data-act="delete" data-key="${esc(key)}" title="delete data">🗑️</button>` : ""}
-      </td>
-    </tr>`;
-  }).join("");
+  let stExpanded = [];
+  try { stExpanded = JSON.parse(localStorage.getItem("netspy.storageExpanded") || "[]"); } catch (e) { /* still */ }
+  const expSet = new Set(stExpanded);
+  if (!stExpanded.length) {
+    // Erstbesuch: oberste Ebene sichtbar — die Roots sind aufgeklappt,
+    // damit man die Hauptlaufwerke SOFORT sieht (TrueNAS: / -> Pools)
+    allKeys.forEach(k => { if ((((available || {})[k] || {}).level || 0) === 0) expSet.add(k); });
+  }
+  // Kinder eines Knotens: alle Einträge, deren parent == dessen Pfad ist.
+  // Ohne parent-Feld (alter Agent) hängt alles am Root → flache Liste.
+  const stKidsOf = path => allKeys
+    .filter(k => (((available || {})[k] || {}).parent || null) === (path || null))
+    .sort((a, b) => (((available || {})[a] || {}).name || a).localeCompare(((available || {})[b] || {}).name || b));
+  // Label: letzter Pfadteil (Ordner-Name); bei "/" der Device-Name (z. B. boot-pool)
+  const stLabel = k => {
+    const av = (available || {})[k] || {};
+    const p = av.path || k;
+    if (p === "/") return av.name || k;
+    return p.split("/").filter(Boolean).pop() || p;
+  };
+  const stRows = (path, depth) => {
+    const kids = stKidsOf(path);
+    if (!kids.length) return "";
+    let html = "";
+    for (const k of kids) {
+      const rec = (recorded || {})[k] || {};
+      const av = (available || {})[k] || {};
+      const name = rec.name || av.name || k;
+      const server = rec.server || av.server || "";
+      const size = rec.size || av.size || 0;
+      const used = rec.used != null ? rec.used : (av.used || 0);
+      const p = stPct(size, used);
+      const gone = !av.name;
+      const isRec = (enabled || []).includes(k);
+      const hasData = (rec.h24 && rec.h24.length) || (rec.d7 && rec.d7.length);
+      const hasKids = stKidsOf(av.path || k).length > 0;
+      const open = expSet.has(k);
+      const pctStyle = p > 90 ? "color:#f87171" : p > 75 ? "color:#fbbf24" : "";
+      const tw = hasKids
+        ? `<span class="sttw" data-tw="${esc(k)}" title="expand">${open ? "▾" : "▸"}</span>`
+        : `<span class="sttw"></span>`;
+      html += `<tr class="${gone ? "restrow" : ""}" data-key="${esc(k)}">
+        <td class="pname" style="padding-left:${depth * 18}px">
+          ${tw}${esc(stLabel(k))}
+          ${av.type === "zfs" && (av.path || k) !== "/" && name !== stLabel(k) ? ` <span class="stsub" title="${esc(name)}">${esc(name.split("/").pop())}</span>` : ""}
+          ${gone ? ` <span class="stgone" title="no longer visible — data kept until you delete it">⚠️</span>` : ""}
+        </td>
+        <td class="srv">${esc(server)}</td>
+        <td class="num" style="${pctStyle}">${p.toFixed(0)}%</td>
+        <td class="num">${fmtBytes(used)} / ${fmtBytes(size)}</td>
+        <td class="num" style="white-space:nowrap">
+          <button class="chip-btn ${isRec ? "active" : ""}" data-act="toggle" data-key="${esc(k)}">${isRec ? "⏹ stop" : "⏺ record"}</button>
+          ${hasData ? `<button class="chip-btn danger" data-act="delete" data-key="${esc(k)}" title="delete data">🗑️</button>` : ""}
+        </td>
+      </tr>`;
+      if (open) html += stRows(av.path || k, depth + 1);
+    }
+    return html;
+  };
+  tbody.innerHTML = stRows(null, 0);
+  // Ausklappen / Einklappen
+  tbody.querySelectorAll("[data-tw]").forEach(sp => sp.addEventListener("click", () => {
+    const k = sp.dataset.tw;
+    if (expSet.has(k)) expSet.delete(k); else expSet.add(k);
+    try { localStorage.setItem("netspy.storageExpanded", JSON.stringify([...expSet])); } catch (e) { /* still */ }
+    renderStorage();
+  }));
+  // Buttons: record / delete (auch auf tiefen Ebenen)
   tbody.querySelectorAll("[data-act]").forEach(b => b.addEventListener("click", () => {
     storagePost(b.dataset.act, b.dataset.key);
   }));

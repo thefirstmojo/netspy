@@ -135,6 +135,10 @@ td.srv { color: var(--muted); }
 .sthead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .stname { font-weight: 600; font-size: 14px; }
 .stgone { color: #f87171; font-size: 11px; }
+.sttw { display: inline-block; width: 18px; cursor: pointer; user-select: none; color: #94a3b8; font-size: 11px; }
+.sttw:hover { color: #22d3ee; }
+.stsub { color: #64748b; font-size: 10px; }
+tr[data-key] .pname { white-space: nowrap; }
 .stfill { margin-left: auto; font-weight: 700; font-size: 15px; }
 .stfill.bad { color: #f87171; }
 .stfill.warn { color: #fbbf24; }
