@@ -24,6 +24,7 @@
       <button id="tabbtn-net" class="tabbtn active" role="tab" aria-selected="true">🌐 Network</button>
       <button id="tabbtn-disk" class="tabbtn" role="tab" aria-selected="false">💾 Disk I/O</button>
       <button id="tabbtn-sys" class="tabbtn" role="tab" aria-selected="false">⚙️ CPU/RAM</button>
+      <button id="tabbtn-storage" class="tabbtn" role="tab" aria-selected="false">💾 Storage</button>
       <button id="tabbtn-settings" class="tabbtn" role="tab" aria-selected="false">🛠️ Settings</button>
     </div>
     <button id="scalebtn" class="scalebtn" title="Force the same Y-axis scale on all charts (for direct comparison)">⚖ Equal scale</button>
@@ -80,6 +81,11 @@
       </div>
     </details>
     <p class="hint" style="margin:8px 4px">CPU% = Anteil an der Gesamt-CPU-Zeit des Hosts (alle Kerne zusammen = 100%), RAM = resident memory (VmRSS). Werte sind geglättet.</p>
+  </section>
+
+  <section id="panel-storage" class="tabpanel hidden">
+    <p class="hint" style="margin:8px 4px">Fill levels of pools/filesystems (logical units, e.g. ZFS pools). Recording is opt-in — enable a drive with the button. Data survives restarts (<code>storage_history.json</code> in <code>/netspy/data</code>); drives that disappear keep their data until you delete it.</p>
+    <div id="storagegrid" class="storagrid"></div>
   </section>
 
   <section id="panel-settings" class="tabpanel hidden">

@@ -201,6 +201,7 @@ class Sampler:
         self._disk_ring: dict = {}   # name -> deque(maxlen=10) Roh-Raten (r, w)
         self._disk_active: dict = {}  # name -> monotonic timestamp
         self._disk_cont: dict = {}   # name -> container (persistent, kein Flackern)
+        self._storage_cache: dict = {"ts": 0.0, "data": []}  # 60-s-Cache
 
         # CPU/RAM pro Prozess (/proc/stat + /proc/<pid>/stat)
         self._cpu_tot_prev: tuple | None = None  # (cpu_total, cpu_idle) kumulativ
@@ -907,6 +908,8 @@ class Sampler:
         disk_list = self._disk_tick(mono, dt)
         # CPU/RAM pro Prozess (unabhängig von ss/Netzwerk)
         system = self._sys_tick(mono, dt)
+        # Füllstände (Pools/Filesysteme, 60-s-Cache)
+        storage = self._storage_snapshot(mono)
 
         with self.lock:
             self._last = {
@@ -920,6 +923,7 @@ class Sampler:
                 "containers": containers_list,
                 "disk": disk_list,
                 "system": system,
+                "storage": storage,
                 "ss_error": self._ss_error,
                 "ss_ok": ss is not None,
                 # Diagnose: pid1 != Container-Init -> pid:host aktiv
@@ -935,6 +939,57 @@ class Sampler:
                     "veths_mapped": len(self._veth_containers),
                 },
             }
+
+    def _storage_snapshot(self, mono: float) -> list:
+        """Füllstände logischer Einheiten (ZFS-Pools / vdevs, Fallback: df).
+
+        zpool list -Hp primär (TrueNAS/Proxmox), df -Pk für Nicht-ZFS-Hosts.
+        Ergebnis wird 60 s gecacht (zpool list ist teuer)."""
+        if mono - self._storage_cache["ts"] < 60:
+            return self._storage_cache["data"]
+        out: list = []
+        try:
+            r = subprocess.run(["zpool", "list", "-Hp"], capture_output=True,
+                               text=True, timeout=5)
+            if r.returncode == 0 and r.stdout.strip():
+                for line in r.stdout.strip().splitlines():
+                    p = line.split("\t")
+                    if len(p) >= 4:
+                        try:
+                            size = int(p[1]); used = int(p[2])
+                        except ValueError:
+                            continue
+                        if size > 0:
+                            out.append({"name": p[0], "size": size,
+                                        "used": used, "free": size - used,
+                                        "type": "zpool"})
+        except Exception:
+            pass
+        if not out:
+            # df-Fallback: nur echte Dateisysteme (keine Pseudo-FS)
+            try:
+                r = subprocess.run(["df", "-Pk"], capture_output=True,
+                                   text=True, timeout=5)
+                for line in r.stdout.strip().splitlines()[1:]:
+                    p = line.split()
+                    if len(p) < 6:
+                        continue
+                    if any(x in p[0] for x in ("tmpfs", "overlay", "proc",
+                                               "sysfs", "devtmpfs", "shm",
+                                               "udev")):
+                        continue
+                    try:
+                        total = int(p[1]) * 1024; used = int(p[2]) * 1024
+                    except ValueError:
+                        continue
+                    if total > 0:
+                        out.append({"name": f"{p[0]} ({p[5]})", "size": total,
+                                    "used": used, "free": total - used,
+                                    "type": "fs"})
+            except Exception:
+                pass
+        self._storage_cache = {"ts": mono, "data": out}
+        return out
 
     def snapshot(self) -> dict:
         with self.lock:

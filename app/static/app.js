@@ -11,6 +11,7 @@ const state = {
   lastServers: [],
   latencyCharts: {}, lastLatency: {},
   equalScale: false, lastSeries: null,
+  lastStorageLoad: 0,
   detailProcs: {}, detailCharts: {},   // server -> {proc, chart}
   procHistory: {},                     // server -> [{ts, procs:[[name,cont,rx,tx],...]}]
   tipEl: null,
@@ -596,6 +597,117 @@ function renderDiskTable(table, servers) {
   }).join("");
 }
 
+/* ---------- Storage (Füllstände Pools/Filesysteme) ---------- */
+let storageData = null;
+let lastStorageLoad = 0;
+let storageCharts = {};  // key:serie -> Chart (für sauberes destroy beim Re-Render)
+
+function stPct(size, used) { return size > 0 ? (used / size) * 100 : 0; }
+
+function fmtBytes(b) {
+  if (b == null || b < 0) return "–";
+  const u = ["B", "KB", "MB", "GB", "TB", "PB"];
+  let i = 0, v = b;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return v.toFixed(v >= 100 ? 0 : 1) + " " + u[i];
+}
+
+async function loadStorage() {
+  try {
+    const r = await fetch("/api/storage");
+    if (!r.ok) return;
+    storageData = await r.json();
+    renderStorage();
+  } catch (e) { /* Offline/Start -> still */ }
+}
+
+function renderStorage() {
+  const grid = document.getElementById("storagegrid");
+  if (!grid || !storageData) return;
+  const { enabled, recorded, available } = storageData;
+  const keys = [...new Set([...Object.keys(recorded || {}), ...Object.keys(available || {})])].sort();
+  if (!keys.length) {
+    Object.values(storageCharts).forEach(ch => { try { ch.destroy(); } catch (e) { /* still */ } });
+    storageCharts = {};
+    grid.innerHTML = `<p class="hint">No pools/filesystems detected yet — agents report storage (zpool / df) every 60 s.</p>`;
+    return;
+  }
+  // Alte Chart-Instanzen sauber zerstören (Canvas werden gleich ersetzt)
+  Object.values(storageCharts).forEach(ch => { try { ch.destroy(); } catch (e) { /* still */ } });
+  storageCharts = {};
+  grid.innerHTML = keys.map(key => {
+    const rec = (recorded || {})[key] || {};
+    const av = (available || {})[key] || {};
+    const name = rec.name || av.name || key;
+    const server = rec.server || av.server || "";
+    const size = rec.size || av.size || 0;
+    const used = rec.used != null ? rec.used : (av.used || 0);
+    const isRec = (enabled || []).includes(key);
+    const p = stPct(size, used);
+    const gone = !av.name;  // Laufwerk nicht mehr sichtbar
+    const hasData = (rec.h24 && rec.h24.length) || (rec.d7 && rec.d7.length);
+    const sname = esc(server), sn = esc(name), skey = esc(key);
+    const chartHtml = (label, points) =>
+      `<div class="stchart"><div class="stlabel">${label}</div><canvas data-k="${skey}" data-s="${label}"></canvas></div>`;
+    return `<div class="stcard${gone ? " gone" : ""}">
+      <div class="sthead">
+        <span class="stname">${sn}</span>
+        <span class="cont">${sname}</span>
+        ${gone ? `<span class="stgone" title="no longer visible — data kept until you delete it">⚠️ missing</span>` : ""}
+        <span class="stfill ${p > 90 ? "bad" : p > 75 ? "warn" : ""}">${p.toFixed(0)}%</span>
+        <span class="sthint">${fmtBytes(used)} / ${fmtBytes(size)}</span>
+      </div>
+      <div class="stbar"><div class="stbar-fill" style="width:${Math.min(p, 100)}%"></div></div>
+      <div class="stcharts">
+        ${chartHtml("24 h", rec.h24 || [])}
+        ${chartHtml("7 days", rec.d7 || [])}
+        ${chartHtml("weeks", rec.w || [])}
+      </div>
+      <div class="stactions">
+        <button class="chip-btn ${isRec ? "active" : ""}" data-act="toggle" data-key="${skey}">${isRec ? "⏹ stop recording" : "⏺ record"}</button>
+        ${hasData ? `<button class="chip-btn danger" data-act="delete" data-key="${skey}">🗑️ delete data</button>` : ""}
+      </div>
+    </div>`;
+  }).join("");
+  // Charts zeichnen (Füllstand in %)
+  grid.querySelectorAll("canvas").forEach(c => {
+    const key = c.dataset.k, serie = c.dataset.s;
+    const rec = (recorded || {})[key] || {};
+    const points = (serie === "24 h" ? rec.h24 : serie === "7 days" ? rec.d7 : rec.w) || [];
+    const size = rec.size || ((available || {})[key] || {}).size || 0;
+    const old = Chart.getChart(c);
+    if (old) old.destroy();
+    if (!points || !points.length) return;
+    const labels = points.map(pp => new Date(pp[0] * 1000)
+      .toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }));
+    const data = points.map(pp => size > 0 ? +((pp[1] / size) * 100).toFixed(1) : 0);
+    storageCharts[key + ":" + serie] = new Chart(c, {
+      type: "line",
+      data: { labels, datasets: [{ data, borderColor: "#f59e0b",
+        backgroundColor: "rgba(245,158,11,.08)", fill: true, pointRadius: 0,
+        tension: .2, borderWidth: 1.5 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false },
+          tooltip: { callbacks: { label: ctx => ctx.parsed.y + " %" } } },
+        scales: { x: { display: false }, y: { display: false, min: 0, max: 100 } }
+      }
+    });
+  });
+  // Buttons: record / delete
+  grid.querySelectorAll("[data-act]").forEach(b => b.addEventListener("click", async () => {
+    const act = b.dataset.act, key = b.dataset.key;
+    try {
+      const r = await fetch("/api/storage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: act, key })
+      });
+      if (r.ok) loadStorage();
+    } catch (e) { /* still */ }
+  }));
+}
+
 /* ---------- CPU/RAM Tabelle: one row per (process x server) ---------- */
 function buildSysHeader(servers) {
   const thead = document.getElementById("systhead");
@@ -843,13 +955,14 @@ function setDiskMode(mode) {
 document.getElementById("diskmode-live").addEventListener("click", () => setDiskMode("live"));
 document.getElementById("diskmode-avg10").addEventListener("click", () => setDiskMode("avg10"));
 
-/* Tab-Umschaltung: Network / Disk / CPU-RAM / Settings */
+/* Tab-Umschaltung: Network / Disk / CPU-RAM / Storage / Settings */
 document.getElementById("tabbtn-net").addEventListener("click", () => setTab("net"));
 document.getElementById("tabbtn-disk").addEventListener("click", () => setTab("disk"));
 document.getElementById("tabbtn-sys").addEventListener("click", () => setTab("sys"));
+document.getElementById("tabbtn-storage").addEventListener("click", () => setTab("storage"));
 document.getElementById("tabbtn-settings").addEventListener("click", () => setTab("settings"));
 
-const TAB_IDS = ["net", "disk", "sys", "settings"];
+const TAB_IDS = ["net", "disk", "sys", "storage", "settings"];
 function setTab(which) {
   for (const t of TAB_IDS) {
     document.getElementById("panel-" + t).classList.toggle("hidden", t !== which);
@@ -1037,4 +1150,9 @@ async function loadProchistory() {
 
 refresh();
 loadProchistory();
+loadStorage();
 setInterval(refresh, 1000);
+setInterval(() => {
+  // Storage-Daten alle 60 s aktualisieren (Füllstände ändern sich langsam)
+  if (Date.now() - lastStorageLoad > 60000) { lastStorageLoad = Date.now(); loadStorage(); }
+}, 60000);

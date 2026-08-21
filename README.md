@@ -27,6 +27,12 @@ Real-time monitoring of your servers in one dashboard: **per-interface, per-proc
 
 ### ⚙️ CPU/RAM tab
 - CPU% and resident RAM per process, plus per-server host totals
+- Display mode switch: **live** (EMA) or **10 s rolling average** (⚡ / 📊 buttons)
+
+### 💾 Storage tab
+- Fill levels of pools/filesystems (logical units, e.g. ZFS pools) — three charts per drive: **24 h** (hourly), **7 days** (daily, today live until midnight), **weeks** (week-end value)
+- Recording is **opt-in per drive** (⏺ button) — nothing is written automatically; data survives restarts (`storage_history.json` in `/netspy/data`)
+- Drives that disappear keep their data until you delete it (🗑️ button)
 
 ### 🛠️ Settings page
 - Add/remove servers in the UI — stored as human-editable `servers.yaml`

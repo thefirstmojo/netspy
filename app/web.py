@@ -207,6 +207,8 @@ class Monitor:
         # Herkunft getrennt halten: Env-Server (Basis) + Config-Datei-Server
         self.env_servers: list = env_servers if env_servers is not None else list(servers)
         self.config_servers: list = config_servers if config_servers is not None else []
+        self.storage_store: StorageStore | None = None
+        self._last_storage_tick: float = 0.0
         self._uplink = uplink
         self._docker_sock = docker_sock
         self.lock = threading.Lock()
@@ -319,6 +321,14 @@ class Monitor:
                             self.online[name] = False
                             self.errors[name] = err or ""
                             self.latency[name].append((time.time(), -1.0))
+                # Storage-History (60 s)
+                if (self.storage_store is not None
+                        and time.monotonic() - self._last_storage_tick >= 60):
+                    self._last_storage_tick = time.monotonic()
+                    with self.lock:
+                        snaps_snap = dict(self.snaps)
+                    smap = self.storage_store.available_map(self.servers, snaps_snap)
+                    self.storage_store.tick(time.time(), smap)
                 time.sleep(1.0)
 
     def _fetch(self, url: str) -> dict:
@@ -481,6 +491,141 @@ class Monitor:
             }
 
 
+class StorageStore:
+    """Persistente Füllstands-History für Pools/Filesysteme (JSON in data_dir).
+
+    - h24: stündlicher Wert, max 24 Einträge (24 h)
+    - d7:  täglicher Wert — der heutige Eintrag wird live gehalten (60-s-Ticks),
+           beim Tageswechsel fixiert; max 7 Einträge
+    - w:   Wochen-Endstand (letzter fixierter Tageswert beim Wochenwechsel),
+           max 260 Einträge (~5 Jahre)
+    - Ein Laufwerk, das nicht mehr sichtbar ist, BEHÄLT seine Daten
+      (der User löscht sie explizit über die UI).
+    - Protokolliert wird NUR, was der User per Toggle aktiviert hat (enabled).
+    """
+
+    def __init__(self, data_dir: str):
+        self.data_dir = data_dir
+        self.path = os.path.join(data_dir, "storage_history.json")
+        self.lock = threading.Lock()
+        self.data: dict = {"enabled": [], "pools": {}}
+        self._load()
+
+    def _load(self) -> None:
+        try:
+            with open(self.path, "r") as f:
+                d = json.load(f)
+            if isinstance(d, dict):
+                self.data = {
+                    "enabled": [k for k in (d.get("enabled") or [])
+                                if isinstance(k, str)],
+                    "pools": d.get("pools") or {},
+                }
+        except Exception:
+            pass
+
+    def _save(self) -> None:
+        try:
+            os.makedirs(self.data_dir, exist_ok=True, mode=0o777)
+            tmp = self.path + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(self.data, f)
+            os.replace(tmp, self.path)
+        except OSError:
+            pass  # kein Volume -> Daten leben nur im RAM, kein Crash
+
+    # ------------------------------------------------------------------
+    def toggle(self, key: str) -> bool:
+        """Protokollierung für ein Laufwerk an/aus. Returns neuer Zustand."""
+        with self.lock:
+            if key in self.data["enabled"]:
+                self.data["enabled"].remove(key)
+                on = False
+            else:
+                self.data["enabled"].append(key)
+                on = True
+            self._save()
+        return on
+
+    def delete(self, key: str) -> None:
+        """Laufwerk inkl. aller Daten löschen."""
+        with self.lock:
+            self.data["enabled"] = [k for k in self.data["enabled"] if k != key]
+            self.data["pools"].pop(key, None)
+            self._save()
+
+    def tick(self, now: float, storage_map: dict) -> None:
+        """60-s-Tick: protokollierte + sichtbare Laufwerke fortschreiben."""
+        changed = False
+        with self.lock:
+            for key in self.data["enabled"]:
+                cur = storage_map.get(key)
+                if cur is None:
+                    continue  # Laufwerk nicht sichtbar -> Daten behalten
+                entry = self.data["pools"].setdefault(key, {
+                    "name": cur["name"], "server": cur["server"],
+                    "type": cur.get("type", ""), "created": int(now),
+                })
+                entry["name"] = cur["name"]
+                entry["server"] = cur["server"]
+                entry["size"] = cur["size"]
+                entry["used"] = cur["used"]
+                self._bump(entry, now)
+                changed = True
+        if changed:
+            self._save()
+
+    def _bump(self, entry: dict, now: float) -> None:
+        now_i = int(now)
+        # h24: stündlich (erster Punkt sofort, dann alle 3600 s)
+        h = entry.setdefault("h24", [])
+        if not h or now_i - h[-1][0] >= 3600:
+            h.append([now_i, entry["used"]])
+            del h[:-24]
+        # d7: heutiger Eintrag live halten, beim Tageswechsel fixieren
+        d = entry.setdefault("d7", [])
+        today = time.localtime(now_i).tm_yday
+        if d and d[-1][2] == today:
+            d[-1] = [now_i, entry["used"], today]
+        else:
+            d.append([now_i, entry["used"], today])
+            del d[:-7]
+        # w: Wochen-Endstand beim Wochenwechsel übernehmen.
+        # Baseline (erster Tick): last_week setzen, KEIN rückwirkender Wert.
+        import datetime
+        iw = datetime.date.fromtimestamp(now_i).isocalendar()
+        week_key = f"{iw[0]}-{iw[1]:02d}"
+        if entry.get("last_week") is None:
+            entry["last_week"] = week_key
+        else:
+            # Letzter FIXIERTER Tageswert aus einer vergangenen Woche =
+            # Endstand der abgelaufenen Woche (einmal pro Wochenwechsel)
+            for dp in reversed(d[:-1]):
+                dw = datetime.date.fromtimestamp(dp[0]).isocalendar()
+                if f"{dw[0]}-{dw[1]:02d}" != week_key:
+                    if entry.get("last_week") != week_key:
+                        entry.setdefault("w", []).append([now_i, dp[1]])
+                        del entry["w"][:-260]
+                        entry["last_week"] = week_key
+                    break
+
+    # ------------------------------------------------------------------
+    def available_map(self, servers: list, snaps: dict) -> dict:
+        """Aktuell sichtbare Laufwerke: key -> {name, server, type, size, used}."""
+        out: dict = {}
+        for s in servers:
+            snap = snaps.get(s["name"])
+            if not snap:
+                continue
+            for st in snap.get("storage", []):
+                out[f"{s['name']}:{st['name']}"] = {
+                    "name": st["name"], "server": s["name"],
+                    "type": st.get("type", ""),
+                    "size": st["size"], "used": st["used"],
+                }
+        return out
+
+
 class WebHandler(BaseHTTPRequestHandler):
     server_version = "NetMonWeb/1.0"
 
@@ -501,6 +646,33 @@ class WebHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/prochistory":
             body = json.dumps(self.server.monitor.prochistory()).encode()
+            self._send_bytes(200, body, "application/json")
+            return
+        if path == "/api/storage":
+            mon = self.server.monitor
+            if mon.storage_store is None:
+                self._send_bytes(503, b'{"error":"storage store unavailable"}',
+                                 "application/json")
+                return
+            store = mon.storage_store
+            with store.lock:
+                enabled = list(store.data["enabled"])
+                pools = dict(store.data["pools"])
+            recorded: dict = {}
+            for key, e in pools.items():
+                recorded[key] = {
+                    "name": e.get("name", key), "server": e.get("server", ""),
+                    "type": e.get("type", ""), "size": e.get("size", 0),
+                    "used": e.get("used", 0), "created": e.get("created", 0),
+                    "h24": e.get("h24", []),
+                    "d7": [[p[0], p[1]] for p in e.get("d7", [])],
+                    "w": e.get("w", []),
+                }
+            body = json.dumps({
+                "enabled": enabled,
+                "recorded": recorded,
+                "available": store.available_map(mon.servers, mon.snaps),
+            }).encode()
             self._send_bytes(200, body, "application/json")
             return
         if path == "/api/settings":
@@ -565,6 +737,34 @@ class WebHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):  # noqa: N802
         path = self.path.split("?")[0]
+        if path == "/api/storage":
+            mon = self.server.monitor
+            if mon.storage_store is None:
+                self._send_bytes(503, b'{"error":"storage store unavailable"}',
+                                 "application/json")
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                data = json.loads(self.rfile.read(length).decode() or "{}")
+            except (ValueError, OSError):
+                self._send_bytes(400, b'{"error":"invalid body"}', "application/json")
+                return
+            action = data.get("action")
+            key = str(data.get("key") or "")
+            if not key:
+                self._send_bytes(400, b'{"error":"key required"}', "application/json")
+                return
+            if action == "toggle":
+                on = mon.storage_store.toggle(key)
+                self._send_bytes(200, json.dumps({"ok": True, "enabled": on}).encode(),
+                                 "application/json")
+                return
+            if action == "delete":
+                mon.storage_store.delete(key)
+                self._send_bytes(200, b'{"ok":true}', "application/json")
+                return
+            self._send_bytes(400, b'{"error":"unknown action"}', "application/json")
+            return
         if path == "/api/settings":
             mon = self.server.monitor
             try:
@@ -743,6 +943,9 @@ def main() -> None:
         env_servers=env_servers,
         config_servers=config_servers,
     )
+    # Storage-History (Füllstände) — data-Ordner neben config (/netspy/data)
+    data_dir = os.path.join(os.path.dirname(config_dir.rstrip("/")) or "/", "data")
+    mon.storage_store = StorageStore(data_dir)
     # Beim Start: leere servers.yaml-Vorlage anlegen (nur bei gemountetem
     # Volume) — sichtbarer Beweis auf dem Host, dass der Pfad korrekt ist.
     if init_config_template(config_dir):

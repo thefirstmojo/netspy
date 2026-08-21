@@ -3,9 +3,10 @@
 
 FROM python:3.13-slim
 
-# ss (iproute2) wird für die Per-Prozess-Messung (inet_diag) benötigt
+# ss (iproute2) für die Per-Prozess-Messung (inet_diag),
+# zfsutils-linux für Pool-Füllstände (zpool list; braucht /dev/zfs am Host)
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends iproute2 \
+    && apt-get install -y --no-install-recommends iproute2 zfsutils-linux \
     && rm -rf /var/lib/apt/lists/*
 
 # pyyaml: menscheneditierbare servers.yaml für die Settings-Page
