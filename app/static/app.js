@@ -664,7 +664,7 @@ function renderStorage() {
       <div class="stcharts">
         ${chartHtml("24 h", rec.h24 || [])}
         ${chartHtml("7 days", rec.d7 || [])}
-        ${chartHtml("weeks", rec.w || [])}
+        ${chartHtml("months", rec.m || [])}
       </div>
       <div class="stactions">
         <button class="chip-btn ${isRec ? "active" : ""}" data-act="toggle" data-key="${skey}">${isRec ? "⏹ stop recording" : "⏺ record"}</button>
@@ -676,7 +676,7 @@ function renderStorage() {
   grid.querySelectorAll("canvas").forEach(c => {
     const key = c.dataset.k, serie = c.dataset.s;
     const rec = (recorded || {})[key] || {};
-    const points = (serie === "24 h" ? rec.h24 : serie === "7 days" ? rec.d7 : rec.w) || [];
+    const points = (serie === "24 h" ? rec.h24 : serie === "7 days" ? rec.d7 : rec.m) || [];
     const size = rec.size || ((available || {})[key] || {}).size || 0;
     const old = Chart.getChart(c);
     if (old) old.destroy();

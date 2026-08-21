@@ -590,23 +590,23 @@ class StorageStore:
         else:
             d.append([now_i, entry["used"], today])
             del d[:-7]
-        # w: Wochen-Endstand beim Wochenwechsel übernehmen.
-        # Baseline (erster Tick): last_week setzen, KEIN rückwirkender Wert.
+        # m: Monats-Endstand beim Monatswechsel übernehmen.
+        # Baseline (erster Tick): last_month setzen, KEIN rückwirkender Wert.
         import datetime
-        iw = datetime.date.fromtimestamp(now_i).isocalendar()
-        week_key = f"{iw[0]}-{iw[1]:02d}"
-        if entry.get("last_week") is None:
-            entry["last_week"] = week_key
+        lt = time.localtime(now_i)
+        month_key = f"{lt.tm_year}-{lt.tm_mon:02d}"
+        if entry.get("last_month") is None:
+            entry["last_month"] = month_key
         else:
-            # Letzter FIXIERTER Tageswert aus einer vergangenen Woche =
-            # Endstand der abgelaufenen Woche (einmal pro Wochenwechsel)
+            # Letzter FIXIERTER Tageswert aus einem vergangenen Monat =
+            # Endstand des abgelaufenen Monats (einmal pro Monatswechsel)
             for dp in reversed(d[:-1]):
-                dw = datetime.date.fromtimestamp(dp[0]).isocalendar()
-                if f"{dw[0]}-{dw[1]:02d}" != week_key:
-                    if entry.get("last_week") != week_key:
-                        entry.setdefault("w", []).append([now_i, dp[1]])
-                        del entry["w"][:-260]
-                        entry["last_week"] = week_key
+                dlt = time.localtime(dp[0])
+                if f"{dlt.tm_year}-{dlt.tm_mon:02d}" != month_key:
+                    if entry.get("last_month") != month_key:
+                        entry.setdefault("m", []).append([now_i, dp[1]])
+                        del entry["m"][:-60]
+                        entry["last_month"] = month_key
                     break
 
     # ------------------------------------------------------------------
@@ -666,7 +666,7 @@ class WebHandler(BaseHTTPRequestHandler):
                     "used": e.get("used", 0), "created": e.get("created", 0),
                     "h24": e.get("h24", []),
                     "d7": [[p[0], p[1]] for p in e.get("d7", [])],
-                    "w": e.get("w", []),
+                    "m": e.get("m", e.get("w", [])),  # Monate (alt: Wochen)
                 }
             body = json.dumps({
                 "enabled": enabled,
