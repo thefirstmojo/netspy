@@ -100,13 +100,9 @@ services:
     # ── WITHOUT a volume the SERVERS env var keeps working (fallback)    ──
     # ── and the settings UI shows a hint on how to add the volume.       ──
     # ── Storage fill levels (💾 Storage tab) ──────────────────────────
-    # ── The container must see the real filesystems/pools.            ──
-    # ──   ZFS hosts (TrueNAS/Proxmox): pass /dev/zfs through           ──
-    # ──   Unraid: mount the storage root read-only (e.g. /mnt/user)    ──
-    # ── Uncomment the matching lines below:                            ──
+    # ── No extra volumes needed: the agent reads the HOST mounts via    ──
+    # ── /proc/mounts + /proc/1/root (pid: host + SYS_PTRACE, see above). ──
     # CONFIG_DIR defaults to /netspy/config (auto-detected) — mount your
     # directory exactly as /netspy.
     # volumes:
     #   - /mnt/user/appdata/netspy:/netspy
-    #   - /dev/zfs:/dev/zfs                      # ZFS hosts only (pools)
-    #   - /mnt/user:/mnt/user:ro                 # Unraid storage root

@@ -1,18 +1,14 @@
 # NetMon — Netzwerk-Überwachung (Unraid + TrueNAS)
 # Ein Image, zwei Rollen (ROLE=web | ROLE=agent). Keine Python-Abhängigkeiten (nur stdlib).
 
-# slim-bookworm (NICHT slim = trixie!): trixie hat zfsutils-linux aus den
-# Repos entfernt — OpenZFS gibt es nur noch bis bookworm.
-FROM python:3.13-slim-bookworm
+# slim (trixie) ist wieder ok: kein zfsutils mehr nötig (siehe RUN-Kommentar)
+FROM python:3.13-slim
 
-# ss (iproute2) für die Per-Prozess-Messung (inet_diag),
-# zfsutils-linux für Pool-Füllstände (zpool list; braucht /dev/zfs am Host).
-# HINWEIS: zfsutils-linux liegt in bookworm im CONTRIB-Repo — die slim-Images
-# haben nur main aktiv, contrib wird hier ergänzt.
-RUN sed -i 's/^Components: main/Components: main contrib/' /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
-    echo "deb http://deb.debian.org/debian bookworm contrib" >> /etc/apt/sources.list 2>/dev/null || true; \
-    apt-get update \
-    && apt-get install -y --no-install-recommends iproute2 zfsutils-linux \
+# ss (iproute2) wird für die Per-Prozess-Messung (inet_diag) benötigt.
+# Kein zfsutils nötig: Füllstände liest der Agent über /proc/1/root
+# (pid: host + SYS_PTRACE, im Compose schon aktiv) — siehe _storage_snapshot.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
 # pyyaml: menscheneditierbare servers.yaml für die Settings-Page

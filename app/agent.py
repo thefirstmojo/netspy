@@ -941,32 +941,51 @@ class Sampler:
             }
 
     def _storage_snapshot(self, mono: float) -> list:
-        """Füllstände logischer Einheiten (ZFS-Pools / vdevs, Fallback: df).
+        """Füllstände logischer Einheiten — direkt aus den HOST-Mounts.
 
-        zpool list -Hp primär (TrueNAS/Proxmox), df -Pk für Nicht-ZFS-Hosts.
-        Ergebnis wird 60 s gecacht (zpool list ist teuer)."""
+        Der Container läuft mit pid: host + SYS_PTRACE: /proc/mounts zeigt
+        die Mounts des HOSTS, und os.statvfs('/proc/1/root/<path>') liefert
+        den Füllstand des Host-Dateisystems — KEIN zfsutils, KEINE extra
+        Volumes nötig. ZFS-Datasets erscheinen als eigene Mounts (fstype
+        zfs) und heißen nach dem Dataset (z. B. 'tank'). Ergebnis wird
+        60 s gecacht."""
         if mono - self._storage_cache["ts"] < 60:
             return self._storage_cache["data"]
         out: list = []
+        skip = {"tmpfs", "overlay", "proc", "sysfs", "devtmpfs", "udev",
+                "shm", "cgroup", "cgroup2", "devpts", "mqueue", "fusectl",
+                "securityfs", "debugfs", "tracefs", "bpf", "autofs",
+                "squashfs", "ramfs", "pstore", "binfmt_misc", "configfs",
+                "rpc_pipefs", "nsfs"}
         try:
-            r = subprocess.run(["zpool", "list", "-Hp"], capture_output=True,
-                               text=True, timeout=5)
-            if r.returncode == 0 and r.stdout.strip():
-                for line in r.stdout.strip().splitlines():
-                    p = line.split("\t")
-                    if len(p) >= 4:
-                        try:
-                            size = int(p[1]); used = int(p[2])
-                        except ValueError:
-                            continue
-                        if size > 0:
-                            out.append({"name": p[0], "size": size,
-                                        "used": used, "free": size - used,
-                                        "type": "zpool"})
-        except Exception:
+            with open(f"{PROC}/mounts") as f:
+                mounts = [ln.split() for ln in f if ln.strip()]
+            seen: set = set()
+            for m in mounts:
+                if len(m) < 3:
+                    continue
+                dev, path, fstype = m[0], m[1], m[2]
+                if fstype in skip or path in seen:
+                    continue
+                seen.add(path)
+                try:
+                    st = os.statvfs(f"/proc/1/root{path.replace(chr(92)+'040', ' ')}")
+                except OSError:
+                    continue
+                frsize = st.f_frsize or st.f_bsize
+                if frsize <= 0 or st.f_blocks <= 0:
+                    continue
+                size = frsize * st.f_blocks
+                used = size - frsize * st.f_bavail
+                if used < 0:
+                    used = 0
+                out.append({"name": dev if fstype == "zfs" else path,
+                            "size": size, "used": used,
+                            "free": max(0, size - used), "type": fstype})
+        except OSError:
             pass
         if not out:
-            # df-Fallback: nur echte Dateisysteme (keine Pseudo-FS)
+            # Fallback: Container-eigene Mounts (ohne pid:host) — df -Pk
             try:
                 r = subprocess.run(["df", "-Pk"], capture_output=True,
                                    text=True, timeout=5)
