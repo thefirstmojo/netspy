@@ -616,6 +616,14 @@ function fmtBytes(b) {
   return v.toFixed(v >= 100 ? 0 : 1) + " " + u[i];
 }
 
+// Tooltip-Größen: TB oder GB je nach Größe, 4 Nachkommastellen für Genauigkeit
+function fmtBig(b) {
+  if (b == null || b < 0) return "–";
+  if (b >= 1024 ** 4) return (b / 1024 ** 4).toFixed(4) + " TB";
+  if (b >= 1024 ** 3) return (b / 1024 ** 3).toFixed(4) + " GB";
+  return (b / 1024 ** 2).toFixed(2) + " MB";
+}
+
 async function loadStorage() {
   try {
     const r = await fetch("/api/storage");
@@ -755,7 +763,10 @@ function renderStorage() {
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: { legend: { display: false },
-            tooltip: { callbacks: { label: ctx => ctx.parsed.y + " %" } } },
+            tooltip: { callbacks: { label: ctx => {
+              const pct = ctx.parsed.y;
+              return `${fmtBig(size * pct / 100)} / ${fmtBig(size)}  (${pct.toFixed(1)} %)`;
+            } } } },
           scales: {
             x: { ticks: { color: "rgba(148,163,184,.5)", maxTicksLimit: 6, font: { size: 10 } } },
             y: { min: yMin, max: yMax, ticks: { color: "rgba(148,163,184,.5)", maxTicksLimit: 5, font: { size: 10 }, callback: v => v + "%" } }
