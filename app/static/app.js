@@ -672,7 +672,7 @@ function renderStorage() {
       const filled = !((rec.h24 && rec.h24.length) || (rec.d7 && rec.d7.length) || (rec.m && rec.m.length));
       const sname = esc(server), sn = esc(name), skey = esc(key);
       const mode = storageMode[key] || "h24";
-      const modeBtn = m => `<button class="chip-btn ${mode === m ? "active" : ""}" data-mode="${m}" data-key="${skey}">${m === "h24" ? "24 h" : m === "d7" ? "7 d" : "months"}</button>`;
+      const modeBtn = m => `<button class="chip-btn ${mode === m ? "active" : ""}" data-mode="${m}" data-key="${skey}">${m === "h24" ? "24 h" : m === "d7" ? "7 d" : "12 m"}</button>`;
       return `<div class="stcard${gone ? " gone" : ""}" data-key="${skey}" draggable="true" title="drag to reorder">
         <div class="sthead">
           <span class="stname">${sn}</span>
