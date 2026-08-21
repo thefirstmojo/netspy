@@ -1151,6 +1151,7 @@ document.getElementById("tabbtn-settings").addEventListener("click", () => setTa
 
 const TAB_IDS = ["net", "disk", "sys", "storage", "settings"];
 function setTab(which) {
+  try { localStorage.setItem("netspy.tab", which); } catch (e) { /* still */ }
   for (const t of TAB_IDS) {
     document.getElementById("panel-" + t).classList.toggle("hidden", t !== which);
     document.getElementById("tabbtn-" + t).classList.toggle("active", t === which);
@@ -1167,6 +1168,14 @@ function setTab(which) {
     if (ch) setTimeout(() => ch.resize(), 30);
   }
 }
+
+/* Beim Laden den zuletzt aktiven Tab wiederherstellen (Reload bleibt im Tab) */
+(function restoreTab() {
+  try {
+    const saved = localStorage.getItem("netspy.tab");
+    if (saved && TAB_IDS.includes(saved)) setTab(saved);
+  } catch (e) { /* still */ }
+})();
 
 /* ---------- Settings (Server-Verwaltung, servers.yaml mit Volume-Fallback) ---------- */
 let settingsData = null;
