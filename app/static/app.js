@@ -601,6 +601,7 @@ function renderDiskTable(table, servers) {
 let storageData = null;
 let lastStorageLoad = 0;
 let storageCharts = {};  // key:serie -> Chart (für sauberes destroy beim Re-Render)
+let storageMode = {};    // key -> "h24" | "d7" | "m" (gewählter Zeitbereich je Karte)
 
 function stPct(size, used) { return size > 0 ? (used / size) * 100 : 0; }
 
@@ -650,8 +651,8 @@ function renderStorage() {
     const gone = !av.name;  // Laufwerk nicht mehr sichtbar
     const hasData = (rec.h24 && rec.h24.length) || (rec.d7 && rec.d7.length);
     const sname = esc(server), sn = esc(name), skey = esc(key);
-    const chartHtml = (label, points) =>
-      `<div class="stchart"><div class="stlabel">${label}</div><canvas data-k="${skey}" data-s="${label}"></canvas></div>`;
+    const mode = storageMode[key] || "h24";
+    const modeBtn = m => `<button class="chip-btn ${mode === m ? "active" : ""}" data-mode="${m}" data-key="${skey}">${m === "h24" ? "24 h" : m === "d7" ? "7 d" : "months"}</button>`;
     return `<div class="stcard${gone ? " gone" : ""}">
       <div class="sthead">
         <span class="stname">${sn}</span>
@@ -661,22 +662,19 @@ function renderStorage() {
         <span class="sthint">${fmtBytes(used)} / ${fmtBytes(size)}</span>
       </div>
       <div class="stbar"><div class="stbar-fill" style="width:${Math.min(p, 100)}%"></div></div>
-      <div class="stcharts">
-        ${chartHtml("24 h", rec.h24 || [])}
-        ${chartHtml("7 days", rec.d7 || [])}
-        ${chartHtml("months", rec.m || [])}
-      </div>
+      <div class="stchartbig"><canvas data-k="${skey}" data-s="${mode}"></canvas></div>
+      <div class="stmodes">${modeBtn("h24")}${modeBtn("d7")}${modeBtn("m")}</div>
       <div class="stactions">
         <button class="chip-btn ${isRec ? "active" : ""}" data-act="toggle" data-key="${skey}">${isRec ? "⏹ stop recording" : "⏺ record"}</button>
         ${hasData ? `<button class="chip-btn danger" data-act="delete" data-key="${skey}">🗑️ delete data</button>` : ""}
       </div>
     </div>`;
   }).join("");
-  // Charts zeichnen (Füllstand in %)
-  grid.querySelectorAll("canvas").forEach(c => {
+  // Große Linien-Grafik pro Karte (wie die Netzwerk-Charts), Serie je Modus
+  grid.querySelectorAll(".stchartbig canvas").forEach(c => {
     const key = c.dataset.k, serie = c.dataset.s;
     const rec = (recorded || {})[key] || {};
-    const points = (serie === "24 h" ? rec.h24 : serie === "7 days" ? rec.d7 : rec.m) || [];
+    const points = (serie === "h24" ? rec.h24 : serie === "d7" ? rec.d7 : rec.m) || [];
     const size = rec.size || ((available || {})[key] || {}).size || 0;
     const old = Chart.getChart(c);
     if (old) old.destroy();
@@ -687,16 +685,24 @@ function renderStorage() {
     storageCharts[key + ":" + serie] = new Chart(c, {
       type: "line",
       data: { labels, datasets: [{ data, borderColor: "#f59e0b",
-        backgroundColor: "rgba(245,158,11,.08)", fill: true, pointRadius: 0,
-        tension: .2, borderWidth: 1.5 }] },
+        backgroundColor: "rgba(245,158,11,.12)", fill: true, pointRadius: 0,
+        tension: .25, borderWidth: 2 }] },
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: { legend: { display: false },
           tooltip: { callbacks: { label: ctx => ctx.parsed.y + " %" } } },
-        scales: { x: { display: false }, y: { display: false, min: 0, max: 100 } }
+        scales: {
+          x: { ticks: { color: "rgba(148,163,184,.5)", maxTicksLimit: 6, font: { size: 10 } } },
+          y: { min: 0, max: 100, ticks: { color: "rgba(148,163,184,.5)", maxTicksLimit: 5, font: { size: 10 }, callback: v => v + "%" } }
+        }
       }
     });
   });
+  // Modus-Umschalter (24 h / 7 d / months)
+  grid.querySelectorAll(".stmodes [data-mode]").forEach(b => b.addEventListener("click", () => {
+    storageMode[b.dataset.key] = b.dataset.mode;
+    renderStorage();
+  }));
   // Buttons: record / delete
   grid.querySelectorAll("[data-act]").forEach(b => b.addEventListener("click", async () => {
     const act = b.dataset.act, key = b.dataset.key;
