@@ -130,10 +130,12 @@ td.srv { color: var(--muted); }
 .chip-btn.active { background: rgba(34,211,238,.12); border-color: var(--rx, #22d3ee); color: var(--rx, #22d3ee); }
 .cpumode { display: inline-flex; gap: 4px; margin-left: 10px; vertical-align: middle; }
 .storagrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; padding: 4px 2px; }
-.stcard { background: var(--card, #0f172a); border: 1px solid var(--border, rgba(148,163,184,.2)); border-radius: 12px; padding: 12px; cursor: grab; }
-.stcard:active { cursor: grabbing; }
+.stcard { background: var(--card, #0f172a); border: 1px solid var(--border, rgba(148,163,184,.2)); border-radius: 12px; padding: 12px; }
+.stcard .stchartbig { cursor: default; }
 .stcard.gone { border-color: rgba(239,68,68,.35); }
-.sthead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sthead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; cursor: grab; }
+.sthead:active { cursor: grabbing; }
+.sthead .stdrag { color: #64748b; font-size: 12px; user-select: none; line-height: 1; }
 .stname { font-weight: 600; font-size: 14px; }
 .stgone { color: #f87171; font-size: 11px; }
 .sttw { display: inline-block; width: 18px; cursor: pointer; user-select: none; color: #94a3b8; font-size: 11px; }

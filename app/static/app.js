@@ -691,6 +691,7 @@ function renderStorage() {
       const modeBtn = m => `<button class="chip-btn ${mode === m ? "active" : ""}" data-mode="${m}" data-key="${skey}">${m === "h24" ? "24 h" : m === "d7" ? "7 d" : "12 m"}</button>`;
       return `<div class="stcard${gone ? " gone" : ""}" data-key="${skey}" draggable="true">
         <div class="sthead">
+          <span class="stdrag" aria-hidden="true" title="">⠿</span>
           <span class="stname">${sn}</span>
           <span class="cont">${sname}</span>
           ${gone ? `<span class="stgone" title="no longer visible — data kept until you delete it">⚠️ missing</span>` : ""}
@@ -771,7 +772,7 @@ function renderStorage() {
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: { legend: { display: false },
-            tooltip: { callbacks: { label: ctx => {
+            tooltip: { mode: "index", intersect: false, callbacks: { label: ctx => {
               const pct = ctx.parsed.y;
               return `${fmtBig(size * pct / 100)} / ${fmtBig(size)}  (${pct.toFixed(1)} %)`;
             } } } },
