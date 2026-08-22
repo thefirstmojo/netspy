@@ -605,6 +605,14 @@ let storageMode = {};    // key -> "h24" | "d7" | "m" (gewählter Zeitbereich je
 let storageScale = "full";  // "full" (0-100%) | "zoom" (Messbereich)
 let storageOrder = [];   // Karten-Reihenfolge (Drag & Drop, localStorage)
 try { storageOrder = JSON.parse(localStorage.getItem("netspy.storageOrder") || "[]"); } catch (e) { storageOrder = []; }
+try {
+  const sm = JSON.parse(localStorage.getItem("netspy.storageMode") || "{}");
+  if (sm && typeof sm === "object") storageMode = sm;
+} catch (e) { /* still */ }
+try {
+  const ss = localStorage.getItem("netspy.storageScale");
+  if (ss === "full" || ss === "zoom") storageScale = ss;
+} catch (e) { /* still */ }
 
 function stPct(size, used) { return size > 0 ? (used / size) * 100 : 0; }
 
@@ -777,6 +785,7 @@ function renderStorage() {
     // Modus-Umschalter (24 h / 7 d / months)
     grid.querySelectorAll(".stmodes [data-mode]").forEach(b => b.addEventListener("click", () => {
       storageMode[b.dataset.key] = b.dataset.mode;
+      try { localStorage.setItem("netspy.storageMode", JSON.stringify(storageMode)); } catch (err) { /* still */ }
       renderStorage();
     }));
     // Drag & Drop: Karten umsortieren (Reihenfolge in localStorage)
@@ -1145,6 +1154,7 @@ document.getElementById("diskmode-avg10").addEventListener("click", () => setDis
 
 function setStorageScale(mode) {
   storageScale = mode;
+  try { localStorage.setItem("netspy.storageScale", mode); } catch (e) { /* still */ }
   const f = document.getElementById("stscale-full"), z = document.getElementById("stscale-zoom");
   if (f) f.classList.toggle("active", mode === "full");
   if (z) z.classList.toggle("active", mode === "zoom");
@@ -1152,6 +1162,12 @@ function setStorageScale(mode) {
 }
 document.getElementById("stscale-full").addEventListener("click", () => setStorageScale("full"));
 document.getElementById("stscale-zoom").addEventListener("click", () => setStorageScale("zoom"));
+/* Gespeicherte Skala beim Laden auf die Buttons uebertragen */
+if (storageScale === "zoom") {
+  const f = document.getElementById("stscale-full"), z = document.getElementById("stscale-zoom");
+  if (f) f.classList.remove("active");
+  if (z) z.classList.add("active");
+}
 
 /* Tab-Umschaltung: Network / Disk / CPU-RAM / Storage / Settings */
 document.getElementById("tabbtn-net").addEventListener("click", () => setTab("net"));
