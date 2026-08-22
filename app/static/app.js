@@ -602,6 +602,7 @@ let storageData = null;
 let lastStorageLoad = 0;
 let storageCharts = {};  // key:serie -> Chart (für sauberes destroy beim Re-Render)
 let storageMode = {};    // key -> "h24" | "d7" | "m" (gewählter Zeitbereich je Karte)
+let storageKeys = [];    // alle bekannten Keys (für globale Modus-Umschaltung)
 let storageScale = "full";  // "full" (0-100%) | "zoom" (Messbereich)
 let storageOrder = [];   // Karten-Reihenfolge (Drag & Drop, localStorage)
 try { storageOrder = JSON.parse(localStorage.getItem("netspy.storageOrder") || "[]"); } catch (e) { storageOrder = []; }
@@ -658,6 +659,7 @@ function renderStorage() {
   if (!grid || !storageData) return;
   const { enabled, recorded, available, host_access } = storageData;
   const allKeys = [...new Set([...Object.keys(recorded || {}), ...Object.keys(available || {})])].sort();
+  storageKeys = allKeys;
   const enabledKeys = allKeys.filter(k => (enabled || []).includes(k));
   // Gespeicherte Drag&Drop-Reihenfolge anwenden (unbekannte Keys ans Ende)
   const orderedKeys = [...enabledKeys].sort((a, b) => {
@@ -904,6 +906,14 @@ function renderStorage() {
   treeEl.querySelectorAll("[data-act]").forEach(b => b.addEventListener("click", () => {
     storagePost(b.dataset.act, b.dataset.key);
   }));
+  // Globale Zeitbereichs-Buttons oben synchronisieren: aktiv, wenn ALLE Karten
+  // denselben Modus haben; sonst keiner (Karten wurden einzeln umgestellt)
+  const uniModes = new Set(storageKeys.map(k => storageMode[k] || "h24"));
+  const uni = uniModes.size === 1 ? [...uniModes][0] : null;
+  [["h24", "stmode-24"], ["d7", "stmode-7"], ["m", "stmode-m"]].forEach(([m, id]) => {
+    const b = document.getElementById(id);
+    if (b) b.classList.toggle("active", uni === m);
+  });
 }
 
 /* ---------- CPU/RAM Tabelle: one row per (process x server) ---------- */
@@ -1163,6 +1173,15 @@ function setStorageScale(mode) {
 }
 document.getElementById("stscale-full").addEventListener("click", () => setStorageScale("full"));
 document.getElementById("stscale-zoom").addEventListener("click", () => setStorageScale("zoom"));
+/* Globale Zeitbereich-Umschaltung: setzt den Modus für ALLE Karten gleichzeitig */
+function setStorageModeAll(mode) {
+  for (const k of storageKeys) storageMode[k] = mode;
+  try { localStorage.setItem("netspy.storageMode", JSON.stringify(storageMode)); } catch (e) { /* still */ }
+  renderStorage();
+}
+document.getElementById("stmode-24").addEventListener("click", () => setStorageModeAll("h24"));
+document.getElementById("stmode-7").addEventListener("click", () => setStorageModeAll("d7"));
+document.getElementById("stmode-m").addEventListener("click", () => setStorageModeAll("m"));
 /* Gespeicherte Skala beim Laden auf die Buttons uebertragen */
 if (storageScale === "zoom") {
   const f = document.getElementById("stscale-full"), z = document.getElementById("stscale-zoom");
