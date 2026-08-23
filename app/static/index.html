@@ -67,9 +67,12 @@
 
   <section id="panel-sys" class="tabpanel hidden">
     <details class="card" open>
-      <summary>RAM — all servers <span class="hint">(GB used, one line per server — tick the server chips above to hide)</span></summary>
+      <summary>CPU &amp; RAM — all servers <span class="hint">(one line per server; dashed line = installed RAM (100%) / CPU limit — tick the server chips above to hide)</span></summary>
       <div style="padding:4px 2px">
-        <canvas id="memchart" style="height:240px"></canvas>
+        <div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:12px">CPU</b><span class="hint" style="font-size:11px">% of all cores</span></div>
+        <canvas id="cpuchart" style="height:150px"></canvas>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px"><b style="font-size:12px">RAM</b><span class="hint" style="font-size:11px">GB used</span></div>
+        <canvas id="memchart" style="height:190px"></canvas>
       </div>
     </details>
     <details class="card" open>
@@ -78,7 +81,6 @@
           <button id="cpumode-live" class="chip-btn active" title="Live values (EMA-smoothed)">⚡ live</button>
           <button id="cpumode-avg10" class="chip-btn" title="10 s rolling average">📊 10 s avg</button>
         </span></summary>
-      <div id="syshosts" class="syshosts"></div>
       <div class="tablewrap">
         <table id="systable">
           <thead id="systhead"></thead>

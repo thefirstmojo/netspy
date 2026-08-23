@@ -217,6 +217,7 @@ class Monitor:
         self.proc_snaps: dict = {}     # server -> deque[(ts, [[name,cont,rx,tx],...])]
         self.latency: dict = {}        # server -> deque[(ts, ms)] (Poll-Antwortzeit)
         self.mem_history: dict = {}    # server -> deque[(ts, mem_used, mem_total)]
+        self.cpu_history: dict = {}    # server -> deque[(ts, cpu, cpu10)]
         self.snaps: dict = {}
         self.online: dict = {}
         self.errors: dict = {}
@@ -229,6 +230,7 @@ class Monitor:
             self.proc_snaps[name] = deque(maxlen=300)  # Zeit-Snapshots fuer Hover-Tooltip
             self.latency[name] = deque(maxlen=300)
             self.mem_history[name] = deque(maxlen=300)
+            self.cpu_history[name] = deque(maxlen=300)
             self.snaps[name] = None
             self.online[name] = False
             self.errors[name] = ""
@@ -252,6 +254,7 @@ class Monitor:
                     self.proc_snaps[name] = deque(maxlen=300)
                     self.latency[name] = deque(maxlen=300)
                     self.mem_history[name] = deque(maxlen=300)
+                    self.cpu_history[name] = deque(maxlen=300)
                 self.snaps.setdefault(name, None)
                 self.online.setdefault(name, False)
                 self.errors.setdefault(name, "")
@@ -261,6 +264,7 @@ class Monitor:
                 self.proc_snaps.pop(name, None)
                 self.latency.pop(name, None)
                 self.mem_history.pop(name, None)
+                self.cpu_history.pop(name, None)
                 self.snaps.pop(name, None)
                 self.online.pop(name, None)
                 self.errors.pop(name, None)
@@ -310,6 +314,12 @@ class Monitor:
                                 self.mem_history[name].append((
                                     time.time(), sysd.get("mem_used", 0),
                                     sysd["mem_total"],
+                                ))
+                            # CPU-Verlauf (Host-CPU% live + 10s-Mittel)
+                            if sysd.get("cpu") is not None:
+                                self.cpu_history[name].append((
+                                    time.time(), sysd.get("cpu", 0.0),
+                                    sysd.get("cpu10", 0.0),
                                 ))
                             self.history[name].append(
                                 (snap["ts"], snap["totals"]["rx"], snap["totals"]["tx"])
@@ -475,6 +485,14 @@ class Monitor:
                         "ts": [p[0] for p in list(self.mem_history.get(s["name"], []))],
                         "used": [p[1] for p in list(self.mem_history.get(s["name"], []))],
                         "total": (list(self.mem_history.get(s["name"], [])) or [None, None, 0])[-1][2],
+                    }
+                    for s in self.servers
+                },
+                "cpu": {
+                    s["name"]: {
+                        "ts": [p[0] for p in list(self.cpu_history.get(s["name"], []))],
+                        "cpu": [p[1] for p in list(self.cpu_history.get(s["name"], []))],
+                        "cpu10": [p[2] for p in list(self.cpu_history.get(s["name"], []))],
                     }
                     for s in self.servers
                 },

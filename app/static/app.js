@@ -446,6 +446,7 @@ function applyVisibility() {
   renderDetailCharts();
   renderStorage();   // Storage-Karten + Dateibrowser respektieren den Filter ebenfalls
   updateMemChart(state.lastMem, state.servers.map(n => ({ name: n })));  // RAM-Graph folgt den Häkchen
+  updateCpuChart(state.lastCpu, state.servers.map(n => ({ name: n })));   // CPU-Graph folgt den Häkchen
 }
 
 /* Live-Werte an die Detail-Grafiken haengen (aus dem aktuellen Dashboard-Poll) */
@@ -985,30 +986,52 @@ function renderSysTable(table, servers) {
   }).join("");
 }
 
-/* ---------- RAM-Verlauf: ALLE Server in EINEM Chart (GB used) ---------- */
+/* ---------- CPU/RAM-Verlauf: ALLE Server in EINEM Chart ---------- */
 let memChart = null;
+let cpuChart = null;
 const MEM_COLORS = ["#22d3ee", "#f59e0b", "#a78bfa", "#4ade80", "#f87171", "#60a5fa", "#f472b6", "#34d399"];
+const srvColor = i => MEM_COLORS[i % MEM_COLORS.length];
+
+// Gemeinsame x-Labels (ts) über alle Server einer Serie
+function seriesLabels(ser, servers) {
+  const set = new Set();
+  (servers || []).forEach(s => { const m = (ser || {})[s.name]; if (m && m.ts) m.ts.forEach(t => set.add(t)); });
+  return [...set].sort((a, b) => a - b);
+}
+
 function updateMemChart(mem, servers) {
   const el = document.getElementById("memchart");
   if (!el) return;
+  const labelArr = seriesLabels(mem, servers).map(fmtTs);
   const datasets = [];
-  const labels = new Set();
+  let maxTotal = 1;
   (servers || []).forEach((s, i) => {
     const m = (mem || {})[s.name];
     if (!m || !m.ts || !m.ts.length) return;
-    m.ts.forEach(t => labels.add(t));
+    const color = srvColor(i);
     const totalGB = (m.total || 1) / 1024 ** 3;
+    maxTotal = Math.max(maxTotal, totalGB);
+    const hidden = state.visible[s.name] === false;
+    // Reale Linie (GB used)
     datasets.push({
       label: s.name,
       data: m.ts.map((t, j) => +(((m.used || [])[j] || 0) / 1024 ** 3).toFixed(3)),
-      borderColor: MEM_COLORS[i % MEM_COLORS.length],
-      backgroundColor: MEM_COLORS[i % MEM_COLORS.length] + "22",
+      borderColor: color, backgroundColor: color + "22",
       fill: false, pointRadius: 0, tension: .25, borderWidth: 2,
-      hidden: state.visible[s.name] === false,   // Server-Häkchen respektieren
-      _totalGB: totalGB,
+      hidden, _totalGB: totalGB,
+    });
+    // Referenz: installierter RAM (100%) — gestrichelte Linie in Serverfarbe,
+    // mit Punkt am linken Rand (damit man sieht, wo 100% liegt)
+    datasets.push({
+      label: s.name + " — installed (100%)",
+      data: labelArr.map((t, j) => +(totalGB).toFixed(3)),
+      borderColor: color, borderDash: [6, 4], borderWidth: 1,
+      backgroundColor: color,
+      fill: false, pointRadius: labelArr.map((t, j) => (j === 0 ? 4 : 0)),
+      pointHoverRadius: 4, hidden, _totalGB: totalGB, _ref: true,
     });
   });
-  const labelArr = [...labels].sort((a, b) => a - b).map(fmtTs);
+  const yMax = Math.ceil(maxTotal * 1.1 / 8) * 8;   // Luft über der höchsten 100%-Linie
   if (!memChart) {
     memChart = new Chart(el, {
       type: "line",
@@ -1022,6 +1045,7 @@ function updateMemChart(mem, servers) {
             callbacks: {
               label: ctx => {
                 const gb = ctx.parsed.y, tot = ctx.dataset._totalGB || 1;
+                if (ctx.dataset._ref) return ` ${ctx.dataset.label}: ${gb.toFixed(2)} GB (100 %)`;
                 return ` ${ctx.dataset.label}: ${gb.toFixed(2)} GB (${((gb / tot) * 100).toFixed(1)} %)`;
               },
             },
@@ -1029,14 +1053,73 @@ function updateMemChart(mem, servers) {
         },
         scales: {
           x: { ticks: { color: "rgba(148,163,184,.5)", maxTicksLimit: 6, maxRotation: 0, font: { size: 10 } }, grid: { color: "rgba(255,255,255,.05)" } },
-          y: { ticks: { color: "rgba(148,163,184,.5)", maxTicksLimit: 5, font: { size: 10 }, callback: v => v + " GB" }, grid: { color: "rgba(255,255,255,.05)" }, beginAtZero: true },
+          y: { min: 0, max: yMax, ticks: { color: "rgba(148,163,184,.5)", maxTicksLimit: 5, font: { size: 10 }, callback: v => v + " GB" }, grid: { color: "rgba(255,255,255,.05)" }, beginAtZero: true },
         },
       },
     });
   } else {
     memChart.data.labels = labelArr;
     memChart.data.datasets = datasets;
+    memChart.options.scales.y.max = yMax;
     memChart.update("none");
+  }
+}
+
+function updateCpuChart(cpu, servers) {
+  const el = document.getElementById("cpuchart");
+  if (!el) return;
+  const labelArr = seriesLabels(cpu, servers).map(fmtTs);
+  const datasets = [];
+  (servers || []).forEach((s, i) => {
+    const m = (cpu || {})[s.name];
+    if (!m || !m.ts || !m.ts.length) return;
+    const color = srvColor(i);
+    const hidden = state.visible[s.name] === false;
+    datasets.push({
+      label: s.name,
+      data: m.ts.map((t, j) => +(((m.cpu || [])[j] ?? 0)).toFixed(1)),
+      borderColor: color, backgroundColor: color + "22",
+      fill: false, pointRadius: 0, tension: .25, borderWidth: 2,
+      hidden,
+    });
+    // Referenz: 100% (alle Kerne) — eine graue Linie, gilt für alle Server
+    datasets.push({
+      label: "100% — all cores",
+      data: labelArr.map(() => 100),
+      borderColor: "#94a3b8", borderDash: [6, 4], borderWidth: 1,
+      backgroundColor: "#94a3b8",
+      fill: false, pointRadius: labelArr.map((t, j) => (j === 0 ? 4 : 0)),
+      pointHoverRadius: 4, hidden, _ref: true,
+    });
+  });
+  if (!cpuChart) {
+    cpuChart = new Chart(el, {
+      type: "line",
+      data: { labels: labelArr, datasets },
+      options: {
+        animation: false, responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: "rgba(148,163,184,.8)", boxWidth: 12, font: { size: 10 } } },
+          tooltip: {
+            mode: "index", intersect: false,
+            callbacks: {
+              label: ctx => {
+                if (ctx.dataset._ref) return ` ${ctx.dataset.label}`;
+                return ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} %`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: { ticks: { color: "rgba(148,163,184,.5)", maxTicksLimit: 6, maxRotation: 0, font: { size: 10 } }, grid: { color: "rgba(255,255,255,.05)" } },
+          y: { min: 0, max: 110, ticks: { color: "rgba(148,163,184,.5)", maxTicksLimit: 5, font: { size: 10 }, callback: v => v + "%" }, grid: { color: "rgba(255,255,255,.05)" }, beginAtZero: true },
+        },
+      },
+    });
+  } else {
+    cpuChart.data.labels = labelArr;
+    cpuChart.data.datasets = datasets;
+    cpuChart.update("none");
   }
 }
 
@@ -1147,6 +1230,7 @@ async function refresh() {
   state.lastHostSys = d.host_sys || {};
   state.lastLatency = d.latency || {};
   state.lastMem = d.mem || {};
+  state.lastCpu = d.cpu || {};
   state.lastServers = d.servers || [];
   state.lastSeries = d.series;
   /* Prozess-History pro Server (eingefrorene Hover-Werte, synchron zu den Chart-ts) */
@@ -1168,9 +1252,9 @@ async function refresh() {
   renderTable(d.table, d.servers);
   renderDiskTable(d.disk || [], d.servers);
   renderSysTable(d.system || [], d.servers);
-  renderSysHosts(d.host_sys || {}, d.servers);
   updateLatency(d.latency);
   updateMemChart(d.mem, d.servers);
+  updateCpuChart(d.cpu, d.servers);
   updateDetailCharts(d);
   renderIfaces(d.ifaces, d.servers);
 }
