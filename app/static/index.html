@@ -67,6 +67,12 @@
 
   <section id="panel-sys" class="tabpanel hidden">
     <details class="card" open>
+      <summary>RAM — all servers <span class="hint">(GB used, one line per server — tick the server chips above to hide)</span></summary>
+      <div style="padding:4px 2px">
+        <canvas id="memchart" style="height:240px"></canvas>
+      </div>
+    </details>
+    <details class="card" open>
       <summary>CPU / RAM by process <span class="hint">(click a column header to sort)</span>
         <span class="cpumode" title="CPU display mode">
           <button id="cpumode-live" class="chip-btn active" title="Live values (EMA-smoothed)">⚡ live</button>

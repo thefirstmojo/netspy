@@ -445,6 +445,7 @@ function applyVisibility() {
   renderTable(state.lastTable || [], state.servers.map(n => ({ name: n })));
   renderDetailCharts();
   renderStorage();   // Storage-Karten + Dateibrowser respektieren den Filter ebenfalls
+  updateMemChart(state.lastMem, state.servers.map(n => ({ name: n })));  // RAM-Graph folgt den Häkchen
 }
 
 /* Live-Werte an die Detail-Grafiken haengen (aus dem aktuellen Dashboard-Poll) */
@@ -945,7 +946,7 @@ function renderSysHosts(host_sys, servers) {
     const cpuV = state.cpuMode === "avg10" ? h.cpu10 : h.cpu;
     return `<span class="syschip" title="Host total">${esc(s.name)}: ` +
       `<b style="color:#22d3ee">CPU ${cpuV == null ? "–" : cpuV + "%"}</b> · ` +
-      `<b style="color:#a78bfa">RAM ${fmt(h.mem_used || 0)} / ${fmt(h.mem_total || 0)} (${memPct}%)</b></span>`;
+      `<b style="color:#a78bfa">RAM ${fmtBytes(h.mem_used || 0)} / ${fmtBytes(h.mem_total || 0)} (${memPct}%)</b></span>`;
   }).join(" ");
 }
 
@@ -980,8 +981,63 @@ function renderSysTable(table, servers) {
       `<td class="pname">${esc(r.name)}${badge}</td>` +
       `<td class="srv">${esc(sname)}</td>` +
       `<td class="num cpu">${cpuV == null ? "–" : cpuV.toFixed(1) + " %"}</td>` +
-      `<td class="num mem">${h.mem == null ? "–" : fmt(h.mem)}</td></tr>`;
+      `<td class="num mem">${h.mem == null ? "–" : fmtBytes(h.mem)}</td></tr>`;
   }).join("");
+}
+
+/* ---------- RAM-Verlauf: ALLE Server in EINEM Chart (GB used) ---------- */
+let memChart = null;
+const MEM_COLORS = ["#22d3ee", "#f59e0b", "#a78bfa", "#4ade80", "#f87171", "#60a5fa", "#f472b6", "#34d399"];
+function updateMemChart(mem, servers) {
+  const el = document.getElementById("memchart");
+  if (!el) return;
+  const datasets = [];
+  const labels = new Set();
+  (servers || []).forEach((s, i) => {
+    const m = (mem || {})[s.name];
+    if (!m || !m.ts || !m.ts.length) return;
+    m.ts.forEach(t => labels.add(t));
+    const totalGB = (m.total || 1) / 1024 ** 3;
+    datasets.push({
+      label: s.name,
+      data: m.ts.map((t, j) => +(((m.used || [])[j] || 0) / 1024 ** 3).toFixed(3)),
+      borderColor: MEM_COLORS[i % MEM_COLORS.length],
+      backgroundColor: MEM_COLORS[i % MEM_COLORS.length] + "22",
+      fill: false, pointRadius: 0, tension: .25, borderWidth: 2,
+      hidden: state.visible[s.name] === false,   // Server-Häkchen respektieren
+      _totalGB: totalGB,
+    });
+  });
+  const labelArr = [...labels].sort((a, b) => a - b).map(fmtTs);
+  if (!memChart) {
+    memChart = new Chart(el, {
+      type: "line",
+      data: { labels: labelArr, datasets },
+      options: {
+        animation: false, responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: "rgba(148,163,184,.8)", boxWidth: 12, font: { size: 10 } } },
+          tooltip: {
+            mode: "index", intersect: false,
+            callbacks: {
+              label: ctx => {
+                const gb = ctx.parsed.y, tot = ctx.dataset._totalGB || 1;
+                return ` ${ctx.dataset.label}: ${gb.toFixed(2)} GB (${((gb / tot) * 100).toFixed(1)} %)`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: { ticks: { color: "rgba(148,163,184,.5)", maxTicksLimit: 6, maxRotation: 0, font: { size: 10 } }, grid: { color: "rgba(255,255,255,.05)" } },
+          y: { ticks: { color: "rgba(148,163,184,.5)", maxTicksLimit: 5, font: { size: 10 }, callback: v => v + " GB" }, grid: { color: "rgba(255,255,255,.05)" }, beginAtZero: true },
+        },
+      },
+    });
+  } else {
+    memChart.data.labels = labelArr;
+    memChart.data.datasets = datasets;
+    memChart.update("none");
+  }
 }
 
 /* ---------- Latenz (Poll-Antwortzeit pro Server) ---------- */
@@ -1090,6 +1146,7 @@ async function refresh() {
   state.lastSys = d.system || [];
   state.lastHostSys = d.host_sys || {};
   state.lastLatency = d.latency || {};
+  state.lastMem = d.mem || {};
   state.lastServers = d.servers || [];
   state.lastSeries = d.series;
   /* Prozess-History pro Server (eingefrorene Hover-Werte, synchron zu den Chart-ts) */
@@ -1113,6 +1170,7 @@ async function refresh() {
   renderSysTable(d.system || [], d.servers);
   renderSysHosts(d.host_sys || {}, d.servers);
   updateLatency(d.latency);
+  updateMemChart(d.mem, d.servers);
   updateDetailCharts(d);
   renderIfaces(d.ifaces, d.servers);
 }
