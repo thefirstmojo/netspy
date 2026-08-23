@@ -7,7 +7,7 @@
   <Name>NetSpy</Name>
   <Description>Live network + disk monitoring: per-interface, per-process and per-container throughput, disk I/O, CPU/RAM, latency and a settings page.</Description>
   <Overview>Web dashboard showing real-time network + disk monitoring of Unraid (and other hosts): interface rates, per-process breakdown (incl. SMB sessions per client), per-container traffic, disk I/O per process, CPU/RAM per process and latency/health. One image, two roles — this template installs the web role; add agents on other hosts (TrueNAS/Debian) via the repo's docker-compose.yml.</Overview>
-  <Category>Network:Tools:</Category>
+  <Category>Network, Tools</Category>
   <ExtraSearchTerms>network monitor traffic throughput dashboard disk io cpu ram latency settings servers</ExtraSearchTerms>
   <ReadMe>https://raw.githubusercontent.com/thefirstmojo/netspy/main/README.md</ReadMe>
   <MinVer>6.9</MinVer>
