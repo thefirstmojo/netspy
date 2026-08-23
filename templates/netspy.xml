@@ -14,8 +14,8 @@
   <MaxVer>7.3</MaxVer>
   <License>MIT</License>
   <Screenshot>https://raw.githubusercontent.com/thefirstmojo/netspy/main/docs/screenshot.png</Screenshot>
-  <Date>2026-08-14</Date>
-  <Changes>v0.5.x: disk I/O + CPU/RAM tabs, SMB sessions per client IP, connection counts, latency/health monitor, settings page (servers.yaml in /netspy/config), config volume added to the template</Changes>
+  <Date>2026-08-22</Date>
+  <Changes>v0.7.x: Storage-Tab als Dateibrowser (alle Ebenen ausklappbar, eigener Baum pro Server, opt-in Recording), Füllstands-History mit Rolling-Loops (24 h / 7 d / 12 Monate), Chart-Tooltip mit TB/GB-Werten, persistente UI-Einstellungen (aktiver Tab, Kartenreihenfolge, Skala, Zeitbereiche), globale Zeitbereich-Umschaltung, Drag &amp; Drop</Changes>
   <Repository>ghcr.io/thefirstmojo/netspy:latest</Repository>
   <Registry>https://github.com/users/thefirstmojo/packages/container/package/netspy</Registry>
   <Support>https://github.com/thefirstmojo/netspy/issues</Support>
