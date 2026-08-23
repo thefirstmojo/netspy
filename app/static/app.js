@@ -444,6 +444,7 @@ function applyVisibility() {
   }
   renderTable(state.lastTable || [], state.servers.map(n => ({ name: n })));
   renderDetailCharts();
+  renderStorage();   // Storage-Karten + Dateibrowser respektieren den Filter ebenfalls
 }
 
 /* Live-Werte an die Detail-Grafiken haengen (aus dem aktuellen Dashboard-Poll) */
@@ -667,6 +668,8 @@ function renderStorage() {
     return (ia === -1 ? 9999 : ia) - (ib === -1 ? 9999 : ib);
   });
   const noHost = !allKeys.length && host_access && Object.values(host_access).some(v => v === false);
+  // Server-Filter (Häkchen oben) auch hier anwenden: Server-Prefix im Key
+  const visibleKeys = orderedKeys.filter(k => state.visible[k.split(":")[0]] !== false);
   // --- Karten oben: NUR aktivierte (recording) Laufwerke ---
   Object.values(storageCharts).forEach(ch => { try { ch.destroy(); } catch (e) { /* still */ } });
   storageCharts = {};
@@ -674,8 +677,10 @@ function renderStorage() {
     grid.innerHTML = noHost
       ? `<p class="hint" style="color:#fbbf24">⚠️ <b>No host access</b> — the container cannot read the host mounts. It must run with <code>--pid=host</code> (host PID namespace): in Unraid go to <b>Docker → NetSpy → Edit → Apply</b> (or <b>Reinstall</b>) so the change takes effect.</p>`
       : `<p class="hint">No drives recording — activate one in the list below.</p>`;
+  } else if (!visibleKeys.length) {
+    grid.innerHTML = `<p class="hint">All servers hidden — tick a server chip above to show its charts.</p>`;
   } else {
-    grid.innerHTML = orderedKeys.map(key => {
+    grid.innerHTML = visibleKeys.map(key => {
       const rec = (recorded || {})[key] || {};
       const av = (available || {})[key] || {};
       const name = rec.name || av.name || key;
@@ -831,7 +836,9 @@ function renderStorage() {
   try { stExpanded = JSON.parse(localStorage.getItem("netspy.storageExpanded") || "[]"); } catch (e) { /* still */ }
   const expSet = new Set(stExpanded);   // Startzustand: alles zugeklappt
   // Server ermitteln (aus available + recorded), stabil alphabetisch sortiert
-  const srvNames = [...new Set(allKeys.map(k => k.includes(":") ? k.split(":")[0] : "(unknown)"))].sort();
+  // NUR Server, die im Filter (Häkchen oben) sichtbar sind
+  const srvNames = [...new Set(allKeys.map(k => k.includes(":") ? k.split(":")[0] : "(unknown)"))]
+    .filter(srv => state.visible[srv] !== false).sort();
   // Kinder eines Knotens NUR im eigenen Server-Baum (parent = Pfad des Knotens)
   const stKidsOf = (server, path) => allKeys
     .filter(k => k.startsWith(server + ":") && (((available || {})[k] || {}).parent || null) === (path || null))
