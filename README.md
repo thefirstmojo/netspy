@@ -2,7 +2,7 @@
 
 [![Build](https://github.com/thefirstmojo/netspy/actions/workflows/publish-image.yml/badge.svg)](https://github.com/thefirstmojo/netspy/actions/workflows/publish-image.yml)
 
-[![Buy me a coffee](https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=&slug=thefirstmojo&button_colour=5F7FFF&font_colour=ffffff&font_coffee_color=FFDD00&outline_colour=000000&coffee_colour=FFDD00&font=Poppins)](https://buymeacoffee.com/thefirstmojo)
+[![Buy me a coffee](assets/bmc-button.svg)](https://buymeacoffee.com/thefirstmojo)
 
 Real-time monitoring of your servers in one dashboard: **per-interface, per-process and per-container network throughput**, **disk I/O per process**, **CPU/RAM**, and **latency/health** — 1 s sampling, no database, no `.env` file. **One image, two roles, one compose.**
 
