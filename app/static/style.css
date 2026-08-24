@@ -149,6 +149,10 @@ tr[data-key] .pname { white-space: nowrap; }
 .stbar { height: 6px; background: rgba(148,163,184,.15); border-radius: 3px; margin: 8px 0; overflow: hidden; }
 .stbar-fill { height: 100%; background: linear-gradient(90deg, #22d3ee, #f59e0b); border-radius: 3px; }
 .stchartbig { height: 170px; margin: 6px 0 4px; }
+/* CPU/RAM-Übersichtscharts: FESTE Container-Höhe noetig (sonst Resize-Loop:
+   maintainAspectRatio:false + hoehenloser Container explodiert) */
+.syschart { position: relative; height: 150px; }
+.syschart.tall { height: 190px; margin-top: 10px; }
 .stmodes { display: flex; gap: 4px; margin: 0 0 10px; }
 .stactions { display: flex; gap: 8px; }
 .chip-btn.danger { border-color: rgba(239,68,68,.4); color: #f87171; }

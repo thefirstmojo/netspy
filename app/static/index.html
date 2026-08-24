@@ -70,9 +70,9 @@
       <summary>CPU &amp; RAM — all servers <span class="hint">(one line per server; dashed line = installed RAM (100%) / CPU limit — tick the server chips above to hide)</span></summary>
       <div style="padding:4px 2px">
         <div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:12px">CPU</b><span class="hint" style="font-size:11px">% of all cores</span></div>
-        <canvas id="cpuchart" style="height:150px"></canvas>
+        <div class="syschart"><canvas id="cpuchart"></canvas></div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px"><b style="font-size:12px">RAM</b><span class="hint" style="font-size:11px">GB used</span></div>
-        <canvas id="memchart" style="height:190px"></canvas>
+        <div class="syschart tall"><canvas id="memchart"></canvas></div>
       </div>
     </details>
     <details class="card" open>
