@@ -14,7 +14,7 @@
   <MaxVer>7.3</MaxVer>
   <License>MIT</License>
   <Screenshot>https://raw.githubusercontent.com/thefirstmojo/netspy/main/docs/screenshot.png</Screenshot>
-  <Date>2026-08-22</Date>
+  <Date>2026-08-24</Date>
   <Changes>v0.7.x: Storage tab as a file browser (all levels expandable, one tree per server, opt-in recording), fill-level history with rolling loops (24 h / 7 d / 12 months), chart tooltips with TB/GB values, persistent UI settings (active tab, card order, scale, time ranges), global time-range switch, drag &amp; drop. v0.7.3: RAM history chart (all servers in one graph, GB), server filter applies to every tab (charts, storage, RAM), RAM unit fixes. v0.7.4: CPU chart + 100% reference lines (installed RAM per server in server color). v0.7.5/0.7.6: chart stability + full-width line fixes</Changes>
   <Repository>ghcr.io/thefirstmojo/netspy:latest</Repository>
   <Registry>https://github.com/users/thefirstmojo/packages/container/package/netspy</Registry>
