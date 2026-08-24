@@ -1094,15 +1094,6 @@ function updateCpuChart(cpu, servers) {
       fill: false, pointRadius: 0, spanGaps: true, tension: .25, borderWidth: 2,
       hidden,
     });
-    // Referenz: 100% (alle Kerne) — eine graue Linie, gilt für alle Server
-    datasets.push({
-      label: "100% — all cores",
-      data: labelArr.map(() => 100),
-      borderColor: "#94a3b8", borderDash: [6, 4], borderWidth: 1,
-      backgroundColor: "#94a3b8",
-      fill: false, pointRadius: labelArr.map((t, j) => (j === 0 ? 4 : 0)),
-      pointHoverRadius: 4, hidden, _ref: true,
-    });
   });
   if (!cpuChart) {
     cpuChart = new Chart(el, {
