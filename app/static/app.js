@@ -992,7 +992,9 @@ let cpuChart = null;
 const MEM_COLORS = ["#22d3ee", "#f59e0b", "#a78bfa", "#4ade80", "#f87171", "#60a5fa", "#f472b6", "#34d399"];
 const srvColor = i => MEM_COLORS[i % MEM_COLORS.length];
 
-// Gemeinsame x-Labels (ts) über alle Server einer Serie
+// Gemeinsame x-Labels (ROHE ts, sortiert) über alle Server einer Serie.
+// Achtung: pro Server unterschiedliche Poll-ts -> Union nutzen und Werte
+// per ts-Lookup zuordnen, sonst enden Linien bei 1/3 der Breite.
 function seriesLabels(ser, servers) {
   const set = new Set();
   (servers || []).forEach(s => { const m = (ser || {})[s.name]; if (m && m.ts) m.ts.forEach(t => set.add(t)); });
@@ -1002,7 +1004,8 @@ function seriesLabels(ser, servers) {
 function updateMemChart(mem, servers) {
   const el = document.getElementById("memchart");
   if (!el) return;
-  const labelArr = seriesLabels(mem, servers).map(fmtTs);
+  const rawLabels = seriesLabels(mem, servers);
+  const labelArr = rawLabels.map(fmtTs);
   const datasets = [];
   let maxTotal = 1;
   (servers || []).forEach((s, i) => {
@@ -1012,12 +1015,16 @@ function updateMemChart(mem, servers) {
     const totalGB = (m.total || 1) / 1024 ** 3;
     maxTotal = Math.max(maxTotal, totalGB);
     const hidden = state.visible[s.name] === false;
-    // Reale Linie (GB used)
+    const tsIdx = new Map(m.ts.map((t, j) => [t, j]));
+    // Reale Linie (GB used) — über ALLE x-Positionen, ts-gemappt
     datasets.push({
       label: s.name,
-      data: m.ts.map((t, j) => +(((m.used || [])[j] || 0) / 1024 ** 3).toFixed(3)),
+      data: rawLabels.map(t => {
+        const j = tsIdx.get(t);
+        return j == null ? null : +(((m.used || [])[j] || 0) / 1024 ** 3).toFixed(3);
+      }),
       borderColor: color, backgroundColor: color + "22",
-      fill: false, pointRadius: 0, tension: .25, borderWidth: 2,
+      fill: false, pointRadius: 0, spanGaps: true, tension: .25, borderWidth: 2,
       hidden, _totalGB: totalGB,
     });
     // Referenz: installierter RAM (100%) — gestrichelte Linie in Serverfarbe,
@@ -1068,18 +1075,23 @@ function updateMemChart(mem, servers) {
 function updateCpuChart(cpu, servers) {
   const el = document.getElementById("cpuchart");
   if (!el) return;
-  const labelArr = seriesLabels(cpu, servers).map(fmtTs);
+  const rawLabels = seriesLabels(cpu, servers);
+  const labelArr = rawLabels.map(fmtTs);
   const datasets = [];
   (servers || []).forEach((s, i) => {
     const m = (cpu || {})[s.name];
     if (!m || !m.ts || !m.ts.length) return;
     const color = srvColor(i);
     const hidden = state.visible[s.name] === false;
+    const tsIdx = new Map(m.ts.map((t, j) => [t, j]));
     datasets.push({
       label: s.name,
-      data: m.ts.map((t, j) => +(((m.cpu || [])[j] ?? 0)).toFixed(1)),
+      data: rawLabels.map(t => {
+        const j = tsIdx.get(t);
+        return j == null ? null : +(((m.cpu || [])[j] ?? 0)).toFixed(1);
+      }),
       borderColor: color, backgroundColor: color + "22",
-      fill: false, pointRadius: 0, tension: .25, borderWidth: 2,
+      fill: false, pointRadius: 0, spanGaps: true, tension: .25, borderWidth: 2,
       hidden,
     });
     // Referenz: 100% (alle Kerne) — eine graue Linie, gilt für alle Server
