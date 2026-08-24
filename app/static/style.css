@@ -220,6 +220,9 @@ details.card[open] summary { color: var(--text); }
 .ifacetable { margin-top: 8px; }
 
 footer { color: var(--muted); font-size: 11px; text-align: center; padding: 12px 0 24px; }
+/* Dezenter Buy-me-a-coffee-Link im Footer (unauffaellig, kein Button-Look) */
+footer .bmc-mini { color: var(--muted); text-decoration: none; opacity: .75; transition: opacity .15s ease; }
+footer .bmc-mini:hover { opacity: 1; color: var(--rx, #22d3ee); }
 
 /* Storage-Dateibrowser: eine Sektion pro Server */
 .stsec { margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px 8px; background: var(--card); }
