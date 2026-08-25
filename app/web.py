@@ -592,8 +592,13 @@ class StorageStore:
             self._save()
 
     def tick(self, now: float, storage_map: dict) -> None:
-        """60-s-Tick: protokollierte + sichtbare Laufwerke fortschreiben."""
-        changed = False
+        """60-s-Tick: protokollierte + sichtbare Laufwerke fortschreiben.
+
+        Die Datei wird NUR bei persistenzrelevanten Ereignissen geschrieben
+        (stündlicher h24-Punkt, Tages-/Monatswechsel) — nicht bei jedem Tick.
+        Der d7-Live-Wert bleibt im RAM minütlich aktuell (fuer die API/Graph).
+        """
+        persist = False
         with self.lock:
             for key in self.data["enabled"]:
                 cur = storage_map.get(key)
@@ -607,19 +612,22 @@ class StorageStore:
                 entry["server"] = cur["server"]
                 entry["size"] = cur["size"]
                 entry["used"] = cur["used"]
-                self._bump(entry, now)
-                changed = True
-        if changed:
+                if self._bump(entry, now):
+                    persist = True
+        if persist:
             self._save()
 
-    def _bump(self, entry: dict, now: float) -> None:
+    def _bump(self, entry: dict, now: float) -> bool:
+        """History fortschreiben. Returns True wenn persistenzrelevant."""
         now_i = int(now)
+        persist = False
         # h24: stündlich (erster Punkt sofort, dann alle 3600 s)
         h = entry.setdefault("h24", [])
         if not h or now_i - h[-1][0] >= 3600:
             h.append([now_i, entry["used"]])
             del h[:-24]
-        # d7: heutiger Eintrag live halten, beim Tageswechsel fixieren
+            persist = True
+        # d7: heutiger Eintrag live halten (RAM), beim Tageswechsel fixieren
         d = entry.setdefault("d7", [])
         today = time.localtime(now_i).tm_yday
         if d and d[-1][2] == today:
@@ -627,6 +635,7 @@ class StorageStore:
         else:
             d.append([now_i, entry["used"], today])
             del d[:-7]
+            persist = True
         # m: Monats-Endstand beim Monatswechsel übernehmen.
         # Baseline (erster Tick): last_month setzen, KEIN rückwirkender Wert.
         import datetime
@@ -644,7 +653,9 @@ class StorageStore:
                         entry.setdefault("m", []).append([now_i, dp[1]])
                         del entry["m"][:-12]
                         entry["last_month"] = month_key
+                        persist = True
                     break
+        return persist
 
     # ------------------------------------------------------------------
     def available_map(self, servers: list, snaps: dict) -> dict:
@@ -700,12 +711,19 @@ class WebHandler(BaseHTTPRequestHandler):
                 enabled = list(store.data["enabled"])
                 pools = dict(store.data["pools"])
             recorded: dict = {}
+            now_i = int(time.time())
             for key, e in pools.items():
+                # h24: letzter Punkt LIVE (aktueller Wert), damit der Graph
+                # minuetlich aktuell ist — die Datei wird nur stuendlich
+                # geschrieben (siehe tick/_bump persist-Flag)
+                h24 = list(e.get("h24", []))
+                if h24:
+                    h24 = h24[:-1] + [[now_i, e.get("used", 0)]]
                 recorded[key] = {
                     "name": e.get("name", key), "server": e.get("server", ""),
                     "type": e.get("type", ""), "size": e.get("size", 0),
                     "used": e.get("used", 0), "created": e.get("created", 0),
-                    "h24": e.get("h24", []),
+                    "h24": h24,
                     "d7": [[p[0], p[1]] for p in e.get("d7", [])],
                     "m": e.get("m", e.get("w", [])),  # Monate (alt: Wochen)
                 }
