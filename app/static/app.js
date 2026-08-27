@@ -727,8 +727,14 @@ function renderStorage() {
       const old = Chart.getChart(c);
       if (old) old.destroy();
       if (!size) return;  // ohne Größe keine sinnvolle Chart
-      const labels = points.map(pp => new Date(pp[0] * 1000)
-        .toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }));
+      // X-Achsen-Label je Modus: 24 h -> nur Uhrzeit, 7 d -> Tag 1-31, 12 m -> Monat 1-12
+      const fmtL = t => {
+        const d = new Date(t);
+        if (serie === "h24") return d.toLocaleString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+        if (serie === "d7") return d.toLocaleString([], { day: "numeric" });
+        return d.toLocaleString([], { month: "numeric" });
+      };
+      const labels = points.map(pp => fmtL(pp[0] * 1000));
       const data = points.map(pp => size > 0 ? +((pp[1] / size) * 100).toFixed(1) : 0);
       // Fehlende Historie mit dem aktuellen Wert auffüllen (gestrichelt =
       // projiziert, KEINE Realdaten). Die Linie läuft wie bei den Netzwerk-
@@ -740,7 +746,6 @@ function renderStorage() {
       const curVal = data.length ? data[data.length - 1] : (size > 0 ? +((usedNow / size) * 100).toFixed(1) : 0);
       const firstReal = points.length ? points[0][0] * 1000 : nowMs;
       const lastReal = points.length ? points[points.length - 1][0] * 1000 : nowMs;
-      const fmtL = t => new Date(t).toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
       const fillVorL = [], fillVorD = [], fillNachL = [], fillNachD = [];
       if (points.length < (horizon / step)) {
         for (let t = nowMs - horizon * 1000; t < firstReal; t += step * 1000) {
