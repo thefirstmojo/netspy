@@ -1712,30 +1712,60 @@ async function loadTerminal() {
 }
 
 /* Drag & Drop: Terminal-Karten umsortieren. Bewusst OHNE Re-Render —
-   per DOM-Move bleiben die iframes geladen und die Verbindungen aktiv. */
+   per DOM-Move bleiben die iframes geladen und die Verbindungen aktiv.
+   Drop-Zone ist der GRID (nicht nur die Karten): die Karten bestehen zu
+   ~90 % aus Iframes, und Drag-Events ueber Iframes gehen ans Iframe-
+   Dokument (cross-origin) — die Zielposition wird deshalb aus der
+   Cursor-Y-Position relativ zu den Karten bestimmt. */
 function bindTermDnD(grid) {
   let dragName = null;
   grid.querySelectorAll(".termcard").forEach(card => {
     card.addEventListener("dragstart", e => {
       dragName = card.dataset.name;
-      e.dataTransfer.effectAllowed = "move";
+      try {
+        e.dataTransfer.setData("text/plain", dragName);  // Pflicht fuer echten Drag
+        e.dataTransfer.effectAllowed = "move";
+      } catch (err) { /* still */ }
       card.style.opacity = ".5";
+      grid.classList.add("termdrag-active");
     });
-    card.addEventListener("dragend", () => { card.style.opacity = ""; });
-    card.addEventListener("dragover", e => e.preventDefault());
-    card.addEventListener("drop", e => {
-      e.preventDefault();
-      const targetName = card.dataset.name;
-      if (!dragName || dragName === targetName) return;
-      const cards = [...grid.querySelectorAll(".termcard")];
-      const list = cards.map(c => c.dataset.name).filter(n => n !== dragName);
-      list.splice(Math.max(0, list.indexOf(targetName)), 0, dragName);
-      termOrder = list;
-      try { localStorage.setItem("netspy.termOrder", JSON.stringify(termOrder)); } catch (err) { /* still */ }
-      const byName = {};
-      cards.forEach(c => { byName[c.dataset.name] = c; });
-      list.forEach(n => grid.appendChild(byName[n]));
+    card.addEventListener("dragend", () => {
+      card.style.opacity = "";
+      grid.classList.remove("termdrag-active");
+      grid.querySelectorAll(".termcard.dragover").forEach(c => c.classList.remove("dragover"));
     });
+  });
+  // Drop im ganzen Grid erlauben (Karten-Kopfzeile, Raender, Zwischenraeume)
+  grid.addEventListener("dragover", e => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    // Ziel-Karte unter dem Cursor markieren (nur wenn kein iframe im Weg)
+    const t = e.target.closest ? e.target.closest(".termcard") : null;
+    grid.querySelectorAll(".termcard.dragover").forEach(c => c.classList.remove("dragover"));
+    if (t && t.dataset.name !== dragName) t.classList.add("dragover");
+  });
+  grid.addEventListener("drop", e => {
+    e.preventDefault();
+    grid.querySelectorAll(".termcard.dragover").forEach(c => c.classList.remove("dragover"));
+    if (!dragName) return;
+    const cards = [...grid.querySelectorAll(".termcard")];
+    const others = cards.filter(c => c.dataset.name !== dragName);
+    if (!others.length) return;
+    // Einfuegeposition aus der Cursor-Y-Position (vor der Karte, deren
+    // obere Haelfte der Cursor passiert hat; sonst ans Ende)
+    const y = e.clientY;
+    let idx = others.length;
+    for (let i = 0; i < others.length; i++) {
+      const r = others[i].getBoundingClientRect();
+      if (y < r.top + r.height / 2) { idx = i; break; }
+    }
+    const names = others.map(c => c.dataset.name);
+    names.splice(idx, 0, dragName);
+    termOrder = names;
+    try { localStorage.setItem("netspy.termOrder", JSON.stringify(termOrder)); } catch (err) { /* still */ }
+    const byName = {};
+    cards.forEach(c => { byName[c.dataset.name] = c; });
+    names.forEach(n => grid.appendChild(byName[n]));
   });
 }
 
