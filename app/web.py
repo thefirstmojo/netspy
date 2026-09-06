@@ -1072,6 +1072,13 @@ class TerminalManager:
     def __init__(self, data_dir: str, ttyd_user: str = "", ttyd_pass: str = ""):
         self.data_dir = data_dir
         self.ssh_dir = os.path.join(data_dir, "ssh")
+        # ssh_dir IMMER anlegen (auch ohne hinterlegte Keys): sonst kann ssh
+        # die known_hosts-Datei nie schreiben und fragt bei JEDER neuen
+        # Verbindung erneut nach dem Host-Key ("Are you sure ...?").
+        try:
+            os.makedirs(self.ssh_dir, exist_ok=True, mode=0o700)
+        except OSError:
+            pass
         self.cfg_path = os.path.join(data_dir, "terminal.json")
         self.ttyd_user = ttyd_user
         self.ttyd_pass = ttyd_pass
@@ -1195,6 +1202,10 @@ class TerminalManager:
                "-W",
                "ssh", "-t",
                "-o", "UserKnownHostsFile=" + self._key_path("known_hosts"),
+               # accept-new: Host-Keys werden automatisch in known_hosts
+               # gespeichert (kein "Are you sure?"-Prompt mehr bei jeder
+               # neuen Verbindung); bei GEÄNDERTEN Keys schlägt es fehl.
+               "-o", "StrictHostKeyChecking=accept-new",
                "-o", "ConnectTimeout=10",
                "-o", "ServerAliveInterval=30"]
         if t["key"]:
