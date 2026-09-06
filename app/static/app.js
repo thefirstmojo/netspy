@@ -1563,6 +1563,10 @@ setInterval(() => {
 
 /* ================= 🖥️ SSH Terminal (ttyd) ================= */
 let termState = { data: null, lastKey: "", editor: [], _editorSync: "" };
+let termOrder = [];   // Terminal-Karten-Reihenfolge (Drag & Drop, localStorage)
+let termHeights = {}; // Terminal-Höhen je Ziel (Resize, localStorage)
+try { termOrder = JSON.parse(localStorage.getItem("netspy.termOrder") || "[]"); } catch (e) { termOrder = []; }
+try { termHeights = JSON.parse(localStorage.getItem("netspy.termHeights") || "{}"); } catch (e) { termHeights = {}; }
 
 async function loadTermState() {
   try {
@@ -1596,17 +1600,84 @@ async function loadTerminal() {
     return;
   }
   termState.lastKey = k;
-  const targets = d.targets || [];
+  // Reihenfolge: Drag&Drop-Order (unbekannte Ziele ans Ende)
+  const targets = (d.targets || []).slice().sort((a, b) => {
+    const ia = termOrder.indexOf(a.name), ib = termOrder.indexOf(b.name);
+    return (ia === -1 ? 9999 : ia) - (ib === -1 ? 9999 : ib);
+  });
   grid.innerHTML = targets.map(t => `
-    <div class="termcard">
-      <div class="termhead"><b>${esc(t.name)}</b>
+    <div class="termcard" data-name="${esc(t.name)}" draggable="true">
+      <div class="termhead" title="drag to reorder">
+        <span class="termdrag" aria-hidden="true">⠿</span>
+        <b>${esc(t.name)}</b>
         <span class="hint">${esc(t.user)}@${esc(t.host)}</span>
         <span class="termstat ${t.running ? "ok" : "bad"}" data-port="${t.port}">${t.running ? "● active" : "○ offline"}</span>
       </div>
-      <iframe class="termframe" data-port="${t.port}" src="http://${location.hostname}:${t.port}"></iframe>
+      <iframe class="termframe" data-port="${t.port}" src="http://${location.hostname}:${t.port}"
+        style="height:${termHeights[t.name] || 340}px"></iframe>
+      <div class="termresize" title="drag to resize"></div>
     </div>`).join("") ||
     `<p class="hint">No terminal targets yet — add them in <b>Settings → 🖥️ SSH Terminal</b>.</p>`;
+  bindTermDnD(grid);
+  bindTermResize();
   updateTermStatus();
+}
+
+/* Drag & Drop: Terminal-Karten umsortieren. Bewusst OHNE Re-Render —
+   per DOM-Move bleiben die iframes geladen und die Verbindungen aktiv. */
+function bindTermDnD(grid) {
+  let dragName = null;
+  grid.querySelectorAll(".termcard").forEach(card => {
+    card.addEventListener("dragstart", e => {
+      dragName = card.dataset.name;
+      e.dataTransfer.effectAllowed = "move";
+      card.style.opacity = ".5";
+    });
+    card.addEventListener("dragend", () => { card.style.opacity = ""; });
+    card.addEventListener("dragover", e => e.preventDefault());
+    card.addEventListener("drop", e => {
+      e.preventDefault();
+      const targetName = card.dataset.name;
+      if (!dragName || dragName === targetName) return;
+      const cards = [...grid.querySelectorAll(".termcard")];
+      const list = cards.map(c => c.dataset.name).filter(n => n !== dragName);
+      list.splice(Math.max(0, list.indexOf(targetName)), 0, dragName);
+      termOrder = list;
+      try { localStorage.setItem("netspy.termOrder", JSON.stringify(termOrder)); } catch (err) { /* still */ }
+      const byName = {};
+      cards.forEach(c => { byName[c.dataset.name] = c; });
+      list.forEach(n => grid.appendChild(byName[n]));
+    });
+  });
+}
+
+/* Resize: Höhe des Terminals per Zug am Balken (150–1000 px, gespeichert) */
+function bindTermResize() {
+  document.querySelectorAll(".termresize").forEach(h => {
+    h.addEventListener("pointerdown", e => {
+      e.preventDefault();
+      const card = h.closest(".termcard");
+      const frame = card.querySelector(".termframe");
+      const name = card.dataset.name;
+      const startY = e.clientY;
+      const startH = frame.getBoundingClientRect().height;
+      try { h.setPointerCapture(e.pointerId); } catch (err) { /* still */ }
+      const move = ev => {
+        const nh = Math.max(150, Math.min(1000, startH + (ev.clientY - startY)));
+        frame.style.height = nh + "px";
+        termHeights[name] = nh;
+      };
+      const up = () => {
+        h.removeEventListener("pointermove", move);
+        h.removeEventListener("pointerup", up);
+        h.removeEventListener("pointercancel", up);
+        try { localStorage.setItem("netspy.termHeights", JSON.stringify(termHeights)); } catch (err) { /* still */ }
+      };
+      h.addEventListener("pointermove", move);
+      h.addEventListener("pointerup", up);
+      h.addEventListener("pointercancel", up);
+    });
+  });
 }
 
 function updateTermStatus() {
