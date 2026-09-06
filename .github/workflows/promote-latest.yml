@@ -1,0 +1,35 @@
+name: promote-latest
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag to promote to :latest (e.g. v0.7.15)"
+        required: true
+        type: string
+
+# Sets the :latest tag to an already-built version — used after the beta
+# build was tested and approved. Does NOT rebuild: imagetools.create points
+# :latest at the existing version manifest.
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote version to :latest
+        run: |
+          docker buildx imagetools create \
+            ghcr.io/${{ github.repository }}:${{ inputs.version }} \
+            ghcr.io/${{ github.repository }}:latest
