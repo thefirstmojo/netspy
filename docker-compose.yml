@@ -78,6 +78,13 @@ services:
       # Shared token — MUST be identical on the web instance and every agent
       AGENT_TOKEN: "CHANGE_ME"
 
+      # SSH Web-Terminal (ttyd, Terminal tab, web role only). Both must be
+      # set — without them the terminal stays disabled (security).
+      # The login protects every terminal; SSH passwords are never stored
+      # (ssh asks interactively when no key is configured).
+      TTYD_USER: ""
+      TTYD_PASS: ""
+
       # Docker socket for per-container rows — only effective together with
       # the volumes block below. Empty string disables it (default for the
       # agent role).

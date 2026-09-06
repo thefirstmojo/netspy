@@ -41,6 +41,13 @@ Real-time monitoring of your servers in one dashboard: **per-interface, per-proc
 - `SERVERS` env entries stay in the env: each row is marked with its origin (env/config) and saving writes only the config rows (edit an env row to move it to the config)
 - Works without a volume too (env fallback); the UI explains what to mount
 
+### 🖥️ Terminal tab (SSH via ttyd, web role)
+- One persistent terminal **per target, stacked below each other** — connect to several servers at the same time
+- Terminals survive tab switches and browser reloads (tmux attach on the target when tmux is installed, plain login shell otherwise)
+- Targets are managed under **Settings → 🖥️ SSH Terminal**: name / host / user, optionally paste an SSH **private key** (stored `0600` in `/netspy/data/ssh`, never sent back to the browser)
+- **Passwords are never stored**: without a key, `ssh` asks for the password interactively right in the terminal
+- Access is guarded by `TTYD_USER` + `TTYD_PASS` (env) — **without both the terminal stays off** (security). Each terminal listens on a host port (7681, 7682, …; host networking) and is embedded at `http://<host-ip>:<port>` — the browser must reach the host directly (page + terminals same host).
+
 ![Disk I/O tab](docs/screenshots/disk-tab.png)
 
 > **⚠️ Requirements:** `network_mode: host` (the sampler needs the host's `/proc` and `ss`) and **root** (host PID namespace, `/proc/<pid>` reads, optional Docker socket — there is no non-root mode). Ports are set via `WEB_PORT`/`AGENT_PORT` — with host networking the value *is* the host port.

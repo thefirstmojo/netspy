@@ -1351,9 +1351,10 @@ document.getElementById("tabbtn-net").addEventListener("click", () => setTab("ne
 document.getElementById("tabbtn-disk").addEventListener("click", () => setTab("disk"));
 document.getElementById("tabbtn-sys").addEventListener("click", () => setTab("sys"));
 document.getElementById("tabbtn-storage").addEventListener("click", () => setTab("storage"));
+document.getElementById("tabbtn-term").addEventListener("click", () => setTab("term"));
 document.getElementById("tabbtn-settings").addEventListener("click", () => setTab("settings"));
 
-const TAB_IDS = ["net", "disk", "sys", "storage", "settings"];
+const TAB_IDS = ["net", "disk", "sys", "storage", "term", "settings"];
 function setTab(which) {
   try { localStorage.setItem("netspy.tab", which); } catch (e) { /* still */ }
   for (const t of TAB_IDS) {
@@ -1362,6 +1363,7 @@ function setTab(which) {
     document.getElementById("tabbtn-" + t).setAttribute("aria-selected", t === which ? "true" : "false");
   }
   if (which === "settings") loadSettings();
+  if (which === "term") loadTerminal();
   /* Chart-Groessen nach Layout-Wechsel neu berechnen */
   for (const s of Object.keys(state.charts)) {
     const ch = state.charts[s];
@@ -1394,7 +1396,9 @@ async function loadSettings() {
   } catch (e) {
     settingsData = null;
   }
+  await loadTermState();   // Terminal-Ziele (für die Settings-Sektion)
   renderSettings();
+  renderTermSettings();
 }
 
 function renderSettings() {
@@ -1556,3 +1560,172 @@ setInterval(() => {
   // Storage-Daten alle 60 s aktualisieren (Füllstände ändern sich langsam)
   if (Date.now() - lastStorageLoad > 60000) { lastStorageLoad = Date.now(); loadStorage(); }
 }, 60000);
+
+/* ================= 🖥️ SSH Terminal (ttyd) ================= */
+let termState = { data: null, lastKey: "", editor: [] };
+
+async function loadTermState() {
+  try {
+    const r = await fetch("/api/terminal");
+    termState.data = await r.json();
+  } catch (e) {
+    termState.data = null;
+  }
+}
+
+function termKey() {
+  const d = termState.data;
+  if (!d) return "";
+  return JSON.stringify((d.targets || []).map(t => [t.name, t.port, t.host, t.user]));
+}
+
+async function loadTerminal() {
+  await loadTermState();
+  const grid = document.getElementById("termgrid");
+  const info = document.getElementById("terminfo");
+  if (!grid) return;
+  const d = termState.data;
+  if (!d) {
+    grid.innerHTML = ""; info.innerHTML = `<p class="hint">Terminal not available.</p>`;
+    return;
+  }
+  if (!d.enabled) {
+    grid.innerHTML = "";
+    info.innerHTML = `<p class="hint" style="color:#fbbf24">⚠️ <b>Terminal disabled</b> — set <code>TTYD_USER</code> and <code>TTYD_PASS</code> as container environment variables, then recreate the container. Without credentials the terminal stays off (security).</p>`;
+    return;
+  }
+  const k = termKey();
+  // Konfig unveraendert -> iframes NICHT neu bauen (Verbindungen bleiben aktiv)
+  if (k === termState.lastKey && grid.children.length) {
+    updateTermStatus();
+    return;
+  }
+  termState.lastKey = k;
+  const targets = d.targets || [];
+  grid.innerHTML = targets.map(t => `
+    <div class="termcard">
+      <div class="termhead"><b>${esc(t.name)}</b>
+        <span class="hint">${esc(t.user)}@${esc(t.host)}</span>
+        <span class="termstat ${t.running ? "ok" : "bad"}" data-port="${t.port}">${t.running ? "● active" : "○ offline"}</span>
+      </div>
+      <iframe class="termframe" data-port="${t.port}" src="http://${location.hostname}:${t.port}"></iframe>
+    </div>`).join("") ||
+    `<p class="hint">No terminal targets yet — add them in <b>Settings → 🖥️ SSH Terminal</b>.</p>`;
+  updateTermStatus();
+}
+
+function updateTermStatus() {
+  const d = termState.data;
+  if (!d) return;
+  for (const t of d.targets || []) {
+    const s = document.querySelector(`.termstat[data-port="${t.port}"]`);
+    if (s) {
+      s.textContent = t.running ? "● active" : "○ offline";
+      s.className = "termstat " + (t.running ? "ok" : "bad");
+    }
+  }
+  const info = document.getElementById("terminfo");
+  if (info) info.innerHTML = d.error
+    ? `<p class="hint" style="color:#fbbf24">⚠️ ${esc(d.error)}</p>` : "";
+}
+
+/* ---------- Settings: Terminal-Ziel-Editor ---------- */
+function syncTermEditor() {
+  // Editor aus Server-Daten befuellen (nur einmal pro Datenstand)
+  const d = termState.data;
+  if (!d) return;
+  const targets = d.targets || [];
+  if (termState.editor.length === targets.length
+      && termState.editor.every((e, i) => e._name === targets[i].name)) return;
+  termState.editor = targets.map(t => ({
+    _name: t.name, name: t.name, host: t.host, user: t.user,
+    has_key: t.has_key, showKey: false, keyText: "", deleteKey: false,
+  }));
+}
+
+function renderTermSettings() {
+  const box = document.getElementById("termsettbox");
+  if (!box) return;
+  const d = termState.data;
+  if (!d) {
+    box.innerHTML = `<p class="hint">Terminal settings not available.</p>`;
+    return;
+  }
+  syncTermEditor();
+  const status = !d.enabled
+    ? `<p class="hint" style="color:#fbbf24">⚠️ Terminal disabled — set <code>TTYD_USER</code> and <code>TTYD_PASS</code> env vars (container recreate) to enable SSH terminals.</p>`
+    : (d.error ? `<p class="hint" style="color:#fbbf24">⚠️ ${esc(d.error)}</p>` : "");
+  const rows = termState.editor.map((e, i) => `
+    <div class="sett-row term-row" data-i="${i}">
+      <input class="sett-name" data-f="name" value="${esc(e.name)}" placeholder="Name (e.g. TrueNAS)">
+      <input data-f="host" value="${esc(e.host)}" placeholder="Host/IP" style="min-width:130px">
+      <input data-f="user" value="${esc(e.user)}" placeholder="User" style="min-width:90px">
+      <span class="termkey">
+        ${e.has_key ? `<span class="hint">🔑 key set</span>` : `<span class="hint" style="color:#fbbf24">no key</span>`}
+        <button class="chip-btn" data-act="key" title="paste an SSH private key (optional)">${e.has_key ? "replace" : "set key"}</button>
+        ${e.has_key ? `<button class="chip-btn danger" data-act="delkey">🗑️ key</button>` : ""}
+      </span>
+      <button class="sett-del" data-act="remove" title="remove target">✕</button>
+    </div>
+    ${e.showKey ? `
+    <div class="term-row" data-i="${i}">
+      <textarea data-f="key" rows="5" spellcheck="false" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----${String.fromCharCode(10)}… paste the private key (without key → ssh asks the password interactively)">${esc(e.keyText)}</textarea>
+    </div>` : ""}
+  `).join("") || `<p class="hint">No targets — add one below.</p>`;
+  box.innerHTML = `
+    ${status}
+    <div class="sett-actions" style="margin-bottom:8px">
+      <button id="term-add" class="chip-btn">＋ Add target</button>
+    </div>
+    ${rows}
+    <div class="sett-actions">
+      <button id="term-save" class="chip-btn ${d.enabled ? "" : ""}">💾 Save targets</button>
+      <span id="termsett-msg" class="hint"></span>
+    </div>`;
+  box.querySelectorAll("input[data-f], textarea[data-f]").forEach(inp => {
+    inp.addEventListener("input", () => {
+      const e = termState.editor[+inp.closest(".term-row").dataset.i];
+      if (inp.dataset.f === "key") e.keyText = inp.value;
+      else e[inp.dataset.f] = inp.value;
+    });
+  });
+  box.querySelectorAll("button[data-act]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const i = +btn.closest(".term-row").dataset.i;
+      const e = termState.editor[i];
+      if (btn.dataset.act === "remove") termState.editor.splice(i, 1);
+      if (btn.dataset.act === "key") e.showKey = !e.showKey;
+      if (btn.dataset.act === "delkey") { e.deleteKey = true; e.has_key = false; }
+      renderTermSettings();
+    });
+  });
+  const add = document.getElementById("term-add");
+  if (add) add.addEventListener("click", () => {
+    termState.editor.push({ _name: "", name: "", host: "", user: "",
+      has_key: false, showKey: false, keyText: "", deleteKey: false });
+    renderTermSettings();
+  });
+  const save = document.getElementById("term-save");
+  if (save) save.addEventListener("click", async () => {
+    const msg = document.getElementById("termsett-msg");
+    const payload = termState.editor.filter(e => e.name || e.host || e.user)
+      .map(e => ({ name: e.name, host: e.host, user: e.user,
+                   key: e.keyText || undefined, delete_key: e.deleteKey || undefined }));
+    try {
+      const r = await fetch("/api/terminal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targets: payload }),
+      });
+      const res = await r.json();
+      if (!r.ok) { msg.textContent = "❌ " + (res.error || r.status); return; }
+      msg.textContent = "✅ Saved — terminals restarted";
+      termState.data = res;
+      termState.lastKey = "";   // Terminal-Tab beim naechsten Oeffnen neu bauen
+      syncTermEditor();
+      renderTermSettings();
+    } catch (e) {
+      msg.textContent = "❌ save failed";
+    }
+  });
+}

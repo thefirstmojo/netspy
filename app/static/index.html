@@ -25,6 +25,7 @@
       <button id="tabbtn-disk" class="tabbtn" role="tab" aria-selected="false">⚡ Disk I/O</button>
       <button id="tabbtn-sys" class="tabbtn" role="tab" aria-selected="false">⚙️ CPU/RAM</button>
       <button id="tabbtn-storage" class="tabbtn" role="tab" aria-selected="false">💾 Storage</button>
+      <button id="tabbtn-term" class="tabbtn" role="tab" aria-selected="false">🖥️ Terminal</button>
       <button id="tabbtn-settings" class="tabbtn" role="tab" aria-selected="false">🛠️ Settings</button>
     </div>
     <button id="scalebtn" class="scalebtn" title="Force the same Y-axis scale on all charts (for direct comparison)">⚖ Equal scale</button>
@@ -115,10 +116,19 @@
     </details>
   </section>
 
+  <section id="panel-term" class="tabpanel hidden">
+    <div id="terminfo" style="margin:8px 4px 0"></div>
+    <div id="termgrid" style="padding:2px"></div>
+  </section>
+
   <section id="panel-settings" class="tabpanel hidden">
     <details class="card" open>
       <summary>Server settings</summary>
       <div id="settingsbox" class="settingsbox"></div>
+    </details>
+    <details class="card" open>
+      <summary>🖥️ SSH Terminal <span class="hint">(targets for the Terminal tab — SSH access to your servers; keys are stored with 0600 in the data volume, passwords are never stored: without a key ssh asks interactively)</span></summary>
+      <div id="termsettbox" class="settingsbox"></div>
     </details>
   </section>
 

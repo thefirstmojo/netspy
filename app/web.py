@@ -21,6 +21,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
+import subprocess
 import threading
 import time
 import urllib.request
@@ -738,6 +741,16 @@ class WebHandler(BaseHTTPRequestHandler):
             }).encode()
             self._send_bytes(200, body, "application/json")
             return
+        if path == "/api/terminal":
+            mon = self.server.monitor
+            term = getattr(mon, "term", None)
+            if term is None:
+                self._send_bytes(503, b'{"error":"terminal unavailable"}',
+                                 "application/json")
+                return
+            body = json.dumps(term.status()).encode()
+            self._send_bytes(200, body, "application/json")
+            return
         if path == "/api/settings":
             mon = self.server.monitor
             writable = config_writable(mon.config_dir)
@@ -800,6 +813,29 @@ class WebHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):  # noqa: N802
         path = self.path.split("?")[0]
+        if path == "/api/terminal":
+            mon = self.server.monitor
+            term = getattr(mon, "term", None)
+            if term is None:
+                self._send_bytes(503, b'{"error":"terminal unavailable"}',
+                                 "application/json")
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                data = json.loads(self.rfile.read(length).decode() or "{}")
+                err = term.set_targets(data.get("targets") or [])
+                if err:
+                    self._send_bytes(400, json.dumps(
+                        {"error": err}).encode(), "application/json")
+                    return
+            except Exception as e:  # noqa: BLE001 - defensiv
+                self._send_bytes(400, json.dumps(
+                    {"error": f"invalid request: {e}"}).encode(),
+                    "application/json")
+                return
+            body = json.dumps(term.status()).encode()
+            self._send_bytes(200, body, "application/json")
+            return
         if path == "/api/storage":
             mon = self.server.monitor
             if mon.storage_store is None:
@@ -991,6 +1027,204 @@ def _config_source(config_dir: str) -> str:
     return "env"
 
 
+# ---------------------------------------------------------------------------
+# Web-Terminal (ttyd): SSH-Zugriff auf die Ziel-Hosts aus dem Dashboard.
+# ---------------------------------------------------------------------------
+class TerminalManager:
+    """Verwaltet ttyd-Instanzen (eine pro Ziel) + Terminal-Konfig.
+
+    - Konfig: <data_dir>/terminal.json (Ziele: Name/Host/User/Key-Datei)
+    - Private Keys: <data_dir>/ssh/<name> (chmod 600). Keys werden NIE im
+      Klartext an die API zurueckgegeben — nur has_key.
+    - Passwoerter werden bewusst NICHT gespeichert: ohne hinterlegten Key
+      fragt ssh im Terminal interaktiv nach dem Passwort.
+    - Schutz: TTYD_USER + TTYD_PASS (env). Ohne beide wird nichts gestartet
+      und die UI blendet den Terminal-Tab aus.
+    - ttyd laeuft im Host-Netzwerk -> erreichbar unter http://<host>:PORT.
+    """
+
+    BASE_PORT = 7681
+
+    def __init__(self, data_dir: str, ttyd_user: str = "", ttyd_pass: str = ""):
+        self.data_dir = data_dir
+        self.ssh_dir = os.path.join(data_dir, "ssh")
+        self.cfg_path = os.path.join(data_dir, "terminal.json")
+        self.ttyd_user = ttyd_user
+        self.ttyd_pass = ttyd_pass
+        self.lock = threading.Lock()
+        self.targets: list = []   # [{"name","host","user","key"|None,"port"}]
+        self.procs: dict = {}     # name -> subprocess.Popen
+        self.error = ""
+        self._load()
+        self.restart()
+
+    # -- Konfig -------------------------------------------------------------
+    def enabled(self) -> bool:
+        return bool(self.ttyd_user and self.ttyd_pass)
+
+    def _load(self) -> None:
+        try:
+            with open(self.cfg_path) as f:
+                d = json.load(f)
+            for t in d.get("targets") or []:
+                if not (t.get("name") and t.get("host") and t.get("user")):
+                    continue
+                self.targets.append({
+                    "name": str(t["name"])[:40], "host": str(t["host"])[:120],
+                    "user": str(t["user"])[:40],
+                    "key": (str(t["key"]) if t.get("key") else None),
+                    "port": self.BASE_PORT + len(self.targets),
+                })
+        except Exception:
+            pass
+
+    def _save(self) -> None:
+        try:
+            os.makedirs(self.data_dir, exist_ok=True, mode=0o777)
+            payload = {"targets": [
+                {"name": t["name"], "host": t["host"], "user": t["user"],
+                 "key": t["key"]} for t in self.targets]}
+            tmp = self.cfg_path + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(payload, f)
+            os.replace(tmp, self.cfg_path)
+        except OSError:
+            pass
+
+    @staticmethod
+    def _safe_name(name: str) -> str:
+        return re.sub(r"[^a-zA-Z0-9_-]", "_", name)[:60] or "key"
+
+    def _key_path(self, fname: str) -> str:
+        return os.path.join(self.ssh_dir, fname)
+
+    # -- Ziele + Keys speichern ---------------------------------------------
+    def set_targets(self, targets: list) -> str:
+        """Speichert Ziele und Keys, startet die ttyd-Instanzen neu.
+
+        Returns Fehlerstring oder '' bei Erfolg. Key-Regeln pro Ziel:
+        - 'key' gesetzt        -> Key-Datei schreiben (ersetzen)
+        - 'delete_key': true   -> bestehende Key-Datei loeschen
+        - beides leer          -> vorhandener Key bleibt erhalten
+        """
+        clean = []
+        try:
+            with self.lock:
+                old = {t["name"].lower(): t for t in self.targets}
+                for i, t in enumerate(targets or []):
+                    name = str((t.get("name") or "").strip())[:40]
+                    host = str((t.get("host") or "").strip())[:120]
+                    user = str((t.get("user") or "").strip())[:40]
+                    if not (name and host and user):
+                        return f"Target {i + 1}: name, host and user are required"
+                    if re.search(r"[\s;|&`$]", host) or "/" in host:
+                        return f"Target {name}: invalid host"
+                    keyfile = None
+                    prev = old.get(name.lower())
+                    if t.get("key"):
+                        keyfile = self._safe_name(name)
+                        try:
+                            os.makedirs(self.ssh_dir, exist_ok=True, mode=0o700)
+                            p = self._key_path(keyfile)
+                            with open(p, "w") as f:
+                                f.write(str(t["key"]).strip() + "\n")
+                            os.chmod(p, 0o600)
+                        except OSError as e:
+                            return f"Target {name}: could not store key ({e})"
+                    elif t.get("delete_key") and prev and prev.get("key"):
+                        try:
+                            os.remove(self._key_path(prev["key"]))
+                        except OSError:
+                            pass
+                    elif prev and prev.get("key"):
+                        keyfile = prev["key"]
+                    clean.append({"name": name, "host": host, "user": user,
+                                 "key": keyfile})
+                for i, t in enumerate(clean):
+                    t["port"] = self.BASE_PORT + i
+                self.targets = clean
+                self._save()
+        except Exception as e:  # noqa: BLE001 - defensiv
+            return f"Speichern fehlgeschlagen: {e}"
+        self.restart()
+        return ""
+
+    # -- ttyd-Prozesse -------------------------------------------------------
+    def _spawn(self, t: dict) -> subprocess.Popen:
+        # Persistente Session: tmux auf dem Zielhost (falls vorhanden) — die
+        # Verbindung ueberlebt Tab-Wechsel und Browser-Reloads. Ohne tmux:
+        # normale Login-Shell. Passwort-Auth bleibt interaktiv (ssh -t).
+        safe = self._safe_name(t["name"])
+        remote = ("command -v tmux >/dev/null 2>&1 && "
+                  f"tmux new -A -s ns-{safe} || exec bash -l")
+        cmd = ["ttyd", "-p", str(t["port"]),
+               "-c", f"{self.ttyd_user}:{self.ttyd_pass}",
+               "ssh", "-t",
+               "-o", "UserKnownHostsFile=" + self._key_path("known_hosts"),
+               "-o", "ConnectTimeout=10",
+               "-o", "ServerAliveInterval=30"]
+        if t["key"]:
+            cmd += ["-i", self._key_path(t["key"])]
+        cmd += [f"{t['user']}@{t['host']}", remote]
+        return subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL)
+
+    def restart(self) -> None:
+        """Beendet alle ttyd-Instanzen und startet sie neu (wenn aktiviert)."""
+        with self.lock:
+            for p in self.procs.values():
+                try:
+                    p.terminate()
+                except Exception:
+                    pass
+            self.procs = {}
+            self.error = ""
+            if not self.enabled():
+                if self.targets:
+                    self.error = ("TTYD_USER/TTYD_PASS not set — "
+                                  "terminal disabled (security)")
+                return
+            if not self.targets:
+                return
+            if shutil.which("ttyd") is None:
+                self.error = "ttyd binary missing in image"
+                return
+            for t in self.targets:
+                try:
+                    p = self._spawn(t)
+                    # Kurzer Poll: Port belegt / ttyd defekt -> sofort melden
+                    time.sleep(0.25)
+                    if p.poll() is not None:
+                        self.error = (f"{t['name']}: ttyd exited ({p.poll()}) — "
+                                      f"port {t['port']} already in use?")
+                    else:
+                        self.procs[t["name"]] = p
+                except Exception as e:  # noqa: BLE001
+                    self.error = f"{t['name']}: {e}"
+
+    def status(self) -> dict:
+        with self.lock:
+            return {
+                "enabled": self.enabled(),
+                "error": self.error,
+                "targets": [
+                    {"name": t["name"], "host": t["host"], "user": t["user"],
+                     "has_key": bool(t["key"]), "port": t["port"],
+                     "running": bool(self.procs.get(t["name"])
+                                     and self.procs[t["name"]].poll() is None)}
+                    for t in self.targets
+                ],
+            }
+
+    def shutdown(self) -> None:
+        for p in self.procs.values():
+            try:
+                p.terminate()
+            except Exception:
+                pass
+        self.procs = {}
+
+
 def main() -> None:
     config_dir = resolve_config_dir(os.environ.get("CONFIG_DIR", ""))
     env_servers = parse_servers(os.environ.get("SERVERS", ""))
@@ -1009,6 +1243,12 @@ def main() -> None:
     # Storage-History (Füllstände) — data-Ordner neben config (/netspy/data)
     data_dir = os.path.join(os.path.dirname(config_dir.rstrip("/")) or "/", "data")
     mon.storage_store = StorageStore(data_dir)
+    # Web-Terminal (ttyd): SSH auf die Ziele; nur aktiv mit TTYD_USER/TTYD_PASS
+    mon.term = TerminalManager(
+        data_dir,
+        ttyd_user=os.environ.get("TTYD_USER", ""),
+        ttyd_pass=os.environ.get("TTYD_PASS", ""),
+    )
     # Beim Start: leere servers.yaml-Vorlage anlegen (nur bei gemountetem
     # Volume) — sichtbarer Beweis auf dem Host, dass der Pfad korrekt ist.
     if init_config_template(config_dir):
