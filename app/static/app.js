@@ -447,6 +447,7 @@ function applyVisibility() {
   renderStorage();   // Storage-Karten + Dateibrowser respektieren den Filter ebenfalls
   updateMemChart(state.lastMem, state.servers.map(n => ({ name: n })));  // RAM-Graph folgt den Häkchen
   updateCpuChart(state.lastCpu, state.servers.map(n => ({ name: n })));   // CPU-Graph folgt den Häkchen
+  applyTermVisibility();  // Terminal-Karten folgen ebenfalls (wenn Tab schon geladen)
 }
 
 /* Live-Werte an die Detail-Grafiken haengen (aus dem aktuellen Dashboard-Poll) */
@@ -1696,8 +1697,9 @@ async function loadTerminal() {
     return;
   }
   termState.lastKey = k;
-  // Reihenfolge: Drag&Drop-Order (unbekannte Ziele ans Ende)
-  const targets = (d.targets || []).slice().sort((a, b) => {
+  // Reihenfolge: Drag&Drop-Order (unbekannte Ziele ans Ende). suggested-
+  // Zeilen (Monitoring-Server ohne User, port 0) bekommen KEINE Karte.
+  const targets = (d.targets || []).filter(t => !t.suggested).slice().sort((a, b) => {
     const ia = termOrder.indexOf(a.name), ib = termOrder.indexOf(b.name);
     return (ia === -1 ? 9999 : ia) - (ib === -1 ? 9999 : ib);
   });
@@ -1716,7 +1718,23 @@ async function loadTerminal() {
     `<p class="hint">No terminal targets yet — add them in <b>Settings → 🖥️ SSH Terminal</b>.</p>`;
   bindTermDnD(grid);
   bindTermResize();
+  applyTermVisibility();
   updateTermStatus();
+}
+
+/* Terminal-Karten folgen dem Server-Filter (Häkchen): nur Karten, deren
+   Zielname einem Monitoring-Server entspricht, werden ausgeblendet. Manuelle
+   Ziele mit anderem Namen bleiben immer sichtbar. display:none lässt die
+   iframes weiterlaufen — SSH-Verbindungen bleiben aktiv. */
+function applyTermVisibility() {
+  const grid = document.getElementById("termgrid");
+  if (!grid) return;
+  grid.querySelectorAll(".termcard").forEach(card => {
+    const nm = card.dataset.name;
+    if (state.servers.includes(nm)) {
+      card.style.display = state.visible[nm] === false ? "none" : "";
+    }
+  });
 }
 
 /* Drag & Drop: Terminal-Karten umsortieren. Bewusst OHNE Re-Render —
@@ -1870,12 +1888,13 @@ function syncTermEditor() {
   // werden — sonst wirkt "Add target" wie ein No-Op.
   const d = termState.data;
   if (!d) return;
-  const sig = JSON.stringify((d.targets || []).map(t => [t.name, t.host, t.user, t.has_key]));
+  const sig = JSON.stringify((d.targets || []).map(t => [t.name, t.host, t.user, t.has_key, !!t.suggested]));
   if (termState._editorSync === sig) return;
   termState._editorSync = sig;
   termState.editor = (d.targets || []).map(t => ({
-    _name: t.name, name: t.name, host: t.host, user: t.user,
-    has_key: t.has_key, showKey: false, keyText: "", deleteKey: false,
+    _name: t.name, name: t.name, host: t.host || "", user: t.user || "",
+    has_key: !!t.has_key, auto: !!t.suggested, showKey: false,
+    keyText: "", deleteKey: false,
   }));
 }
 
@@ -1891,17 +1910,22 @@ function renderTermSettings() {
   const status = !d.enabled
     ? `<p class="hint" style="color:#fbbf24">🔒 Terminal login not configured — set <code>TTYD_USER</code> and <code>TTYD_PASS</code> as container environment variables (Unraid: Docker → NetSpy → edit → apply), then recreate the container. The Terminal tab stays locked until then; you can still set up targets here.</p>`
     : (d.error ? `<p class="hint" style="color:#fbbf24">⚠️ ${esc(d.error)}</p>` : "");
+  const nAuto = (d.targets || []).filter(t => t.suggested).length;
+  const autoHint = nAuto
+    ? `<p class="hint">🪄 Your monitoring servers are auto-listed as SSH targets below (no user yet). Enter the <b>user</b> and save — the target activates. Auto rows can't be removed here; disable the server in Settings → Server list instead.</p>`
+    : "";
   const rows = termState.editor.map((e, i) => `
     <div class="sett-row term-row" data-i="${i}">
-      <input class="sett-name" data-f="name" value="${esc(e.name)}" placeholder="Name (e.g. TrueNAS)">
+      <input class="sett-name" data-f="name" value="${esc(e.name)}" placeholder="Name (e.g. TrueNAS)" ${e.auto ? "disabled title=\"from monitoring servers\"" : ""}>
       <input data-f="host" value="${esc(e.host)}" placeholder="Host/IP" style="min-width:130px">
       <input data-f="user" value="${esc(e.user)}" placeholder="User" style="min-width:90px">
+      ${e.auto ? `<span class="hint" style="color:#fbbf24;white-space:nowrap" title="auto-suggested from monitoring servers">🪄 auto</span>` : ""}
       <span class="termkey">
         ${e.has_key ? `<span class="hint">🔑 key set</span>` : `<span class="hint" style="color:#fbbf24">no key</span>`}
         <button class="chip-btn" data-act="key" title="paste an SSH private key (optional)">${e.has_key ? "replace" : "set key"}</button>
         ${e.has_key ? `<button class="chip-btn danger" data-act="delkey">🗑️ key</button>` : ""}
       </span>
-      <button class="sett-del" data-act="remove" title="remove target">✕</button>
+      ${e.auto ? "" : `<button class="sett-del" data-act="remove" title="remove target">✕</button>`}
     </div>
     ${e.showKey ? `
     <div class="term-row" data-i="${i}">
@@ -1910,6 +1934,7 @@ function renderTermSettings() {
   `).join("") || `<p class="hint">No targets — add one below.</p>`;
   box.innerHTML = `
     ${status}
+    ${autoHint}
     <div class="sett-actions" style="margin-bottom:8px">
       <button id="term-add" class="chip-btn">＋ Add target</button>
     </div>
@@ -1938,15 +1963,29 @@ function renderTermSettings() {
   const add = document.getElementById("term-add");
   if (add) add.addEventListener("click", () => {
     termState.editor.push({ _name: "", name: "", host: "", user: "",
-      has_key: false, showKey: false, keyText: "", deleteKey: false });
+      has_key: false, auto: false, showKey: false, keyText: "", deleteKey: false });
     renderTermSettings();
   });
   const save = document.getElementById("term-save");
   if (save) save.addEventListener("click", async () => {
     const msg = document.getElementById("termsett-msg");
-    const payload = termState.editor.filter(e => e.name || e.host || e.user)
-      .map(e => ({ name: e.name, host: e.host, user: e.user,
-                   key: e.keyText || undefined, delete_key: e.deleteKey || undefined }));
+    const full = e => (e.name || "").trim() && (e.host || "").trim() && (e.user || "").trim();
+    const rows = termState.editor;
+    const complete = rows.filter(full);
+    const skipped = rows.length - complete.length;
+    // Auto-Zeilen (Monitoring-Server ohne User) sind nur Vorschlaege: ohne
+    // User werden sie nicht gespeichert, sondern erscheinen nach dem Save
+    // automatisch wieder. Nur wenn der User ALLE echten/manuellen Zeilen
+    // entfernt hat, ist ein leerer POST gewollt (alles loeschen).
+    const nonAuto = rows.filter(e => !e.auto);
+    if (!complete.length && nonAuto.length) {
+      msg.textContent = skipped
+        ? `⏸ Nothing to save — ${skipped} row(s) need user + host`
+        : "⏸ Nothing to save";
+      return;
+    }
+    const payload = complete.map(e => ({ name: e.name, host: e.host, user: e.user,
+      key: e.keyText || undefined, delete_key: e.deleteKey || undefined }));
     try {
       const r = await fetch("/api/terminal", {
         method: "POST",
@@ -1955,11 +1994,16 @@ function renderTermSettings() {
       });
       const res = await r.json();
       if (!r.ok) { msg.textContent = "❌ " + (res.error || r.status); return; }
-      msg.textContent = "✅ Saved — terminals restarted";
+      const okMsg = skipped
+        ? `✅ Saved ${complete.length} target(s) — ${skipped} incomplete row(s) kept as draft`
+        : `✅ Saved — ${complete.length} target(s) restarted`;
       termState.data = res;
       termState.lastKey = "";   // Terminal-Tab beim naechsten Oeffnen neu bauen
       syncTermEditor();
       renderTermSettings();
+      // renderTermSettings baut die Box neu -> Meldung danach erneut setzen
+      const msg2 = document.getElementById("termsett-msg");
+      if (msg2) msg2.textContent = okMsg;
     } catch (e) {
       msg.textContent = "❌ save failed";
     }

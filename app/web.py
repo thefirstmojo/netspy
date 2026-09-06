@@ -748,7 +748,7 @@ class WebHandler(BaseHTTPRequestHandler):
                 self._send_bytes(503, b'{"error":"terminal unavailable"}',
                                  "application/json")
                 return
-            body = json.dumps(term.status()).encode()
+            body = json.dumps(term.status(mon.servers)).encode()
             self._send_bytes(200, body, "application/json")
             return
         if path == "/api/settings":
@@ -853,7 +853,7 @@ class WebHandler(BaseHTTPRequestHandler):
                     {"error": f"invalid request: {e}"}).encode(),
                     "application/json")
                 return
-            body = json.dumps(term.status()).encode()
+            body = json.dumps(term.status(mon.servers)).encode()
             self._send_bytes(200, body, "application/json")
             return
         if path == "/api/storage":
@@ -1050,9 +1050,27 @@ def _config_source(config_dir: str) -> str:
 # ---------------------------------------------------------------------------
 # Web-Terminal (ttyd): SSH-Zugriff auf die Ziel-Hosts aus dem Dashboard.
 # ---------------------------------------------------------------------------
+def _suggested_host(url) -> str:
+    """SSH-Host-Vorschlag aus einer Monitoring-Server-URL.
+
+    'http://192.168.2.100:8091' -> '192.168.2.100' (der API-Port ist nicht
+    der SSH-Port). local/null -> 'localhost' (der eigene Host).
+    """
+    if not url or not str(url).strip() or str(url).strip().lower() == "local":
+        return "localhost"
+    u = str(url).strip()
+    for pre in ("http://", "https://", "ssh://"):
+        if u.startswith(pre):
+            u = u[len(pre):]
+            break
+    u = u.split("/", 1)[0]
+    if u.startswith("["):  # IPv6
+        return u[1:].split("]")[0] or "localhost"
+    return u.split(":", 1)[0] or "localhost"
+
+
 class TerminalManager:
     """Verwaltet ttyd-Instanzen (eine pro Ziel) + Terminal-Konfig.
-
     - Konfig: <data_dir>/terminal.json (Ziele: Name/Host/User/Key-Datei)
     - Private Keys: <data_dir>/ssh/<name> (chmod 600). Keys werden NIE im
       Klartext an die API zurueckgegeben — nur has_key.
@@ -1247,18 +1265,35 @@ class TerminalManager:
                 except Exception as e:  # noqa: BLE001
                     self.error = f"{t['name']}: {e}"
 
-    def status(self) -> dict:
+    def status(self, monitor_servers: list | None = None) -> dict:
+        """Ziel-Status. Wenn monitor_servers uebergeben wird, enthaelt die
+        Liste zusaetzlich Auto-Vorschlaege: Monitoring-Server, die noch KEIN
+        SSH-Ziel haben, erscheinen als suggested-Zeile (user leer, host aus
+        der Server-URL). Der User traegt nur noch den Benutzernamen ein und
+        speichert — dann wird die Zeile beim naechsten Speichern ein echtes
+        Ziel. suggested-Zeilen haben port 0 und werden nie gespawnt."""
         with self.lock:
+            existing = {t["name"].lower() for t in self.targets}
+            out = [
+                {"name": t["name"], "host": t["host"], "user": t["user"],
+                 "has_key": bool(t["key"]), "port": t["port"],
+                 "running": bool(self.procs.get(t["name"])
+                                 and self.procs[t["name"]].poll() is None)}
+                for t in self.targets
+            ]
+            for s in monitor_servers or []:
+                nm = str((s or {}).get("name") or "").strip()
+                if not nm or nm.lower() in existing:
+                    continue
+                out.append({
+                    "name": nm, "host": _suggested_host(s.get("url")),
+                    "user": "", "has_key": False, "port": 0,
+                    "running": False, "suggested": True,
+                })
             return {
                 "enabled": self.enabled(),
                 "error": self.error,
-                "targets": [
-                    {"name": t["name"], "host": t["host"], "user": t["user"],
-                     "has_key": bool(t["key"]), "port": t["port"],
-                     "running": bool(self.procs.get(t["name"])
-                                     and self.procs[t["name"]].poll() is None)}
-                    for t in self.targets
-                ],
+                "targets": out,
             }
 
     def shutdown(self) -> None:
