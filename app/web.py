@@ -813,6 +813,26 @@ class WebHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):  # noqa: N802
         path = self.path.split("?")[0]
+        if path == "/api/terminal/login":
+            mon = self.server.monitor
+            term = getattr(mon, "term", None)
+            if term is None:
+                self._send_bytes(503, b'{"error":"terminal unavailable"}',
+                                 "application/json")
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                data = json.loads(self.rfile.read(length).decode() or "{}")
+            except Exception:  # noqa: BLE001 - defensiv
+                data = {}
+            if term.check_login(str(data.get("user") or ""),
+                                str(data.get("pass") or "")):
+                self._send_bytes(200, b'{"ok":true}', "application/json")
+            else:
+                self._send_bytes(401,
+                                 b'{"error":"invalid credentials"}',
+                                 "application/json")
+            return
         if path == "/api/terminal":
             mon = self.server.monitor
             term = getattr(mon, "term", None)
@@ -1037,19 +1057,24 @@ class TerminalManager:
     - Private Keys: <data_dir>/ssh/<name> (chmod 600). Keys werden NIE im
       Klartext an die API zurueckgegeben — nur has_key.
     - Passwoerter werden bewusst NICHT gespeichert: ohne hinterlegten Key
-      fragt ssh im Terminal interaktiv nach dem Passwort — DAS ist der
-      Zugriffsschutz der Ziele (die ttyd-Ebene selbst hat keine eigene Auth:
-      eingebettete Iframes koennen kein Basic-Auth-Popup; privates LAN +
-      SSH-Auth der Ziele, siehe README).
-    - ttyd laeuft im Host-Netzwerk -> erreichbar unter http://<host>:PORT.
+      fragt ssh im Terminal interaktiv nach dem Passwort — das ist der
+      Zugriffsschutz der Ziele selbst.
+    - Login-Schutz der Terminal-UI: TTYD_USER + TTYD_PASS (env) — das
+      Dashboard (Settings etc.) bleibt offen, aber der Terminal-Tab zeigt
+      erst nach diesem Login die iframes. Der Login laeuft ueber die
+      NetSpy-API (gleiche Origin, kein iframe-Basic-Auth-Problem).
+    - ttyd selbst laeuft OHNE eigene Auth auf Host-Ports 7681+ (private
+      LAN; siehe README-Warnung).
     """
 
     BASE_PORT = 7681
 
-    def __init__(self, data_dir: str):
+    def __init__(self, data_dir: str, ttyd_user: str = "", ttyd_pass: str = ""):
         self.data_dir = data_dir
         self.ssh_dir = os.path.join(data_dir, "ssh")
         self.cfg_path = os.path.join(data_dir, "terminal.json")
+        self.ttyd_user = ttyd_user
+        self.ttyd_pass = ttyd_pass
         self.lock = threading.Lock()
         self.targets: list = []   # [{"name","host","user","key"|None,"port"}]
         self.procs: dict = {}     # name -> subprocess.Popen
@@ -1059,8 +1084,15 @@ class TerminalManager:
 
     # -- Konfig -------------------------------------------------------------
     def enabled(self) -> bool:
-        # Keine separate Auth-Ebene mehr — siehe Klassen-Docstring.
-        return True
+        return bool(self.ttyd_user and self.ttyd_pass)
+
+    def check_login(self, user: str, pw: str) -> bool:
+        """Prueft die Terminal-Zugangsdaten gegen die env-Variablen."""
+        if not self.enabled():
+            return False
+        import hmac
+        return (hmac.compare_digest(user or "", self.ttyd_user)
+                and hmac.compare_digest(pw or "", self.ttyd_pass))
 
     def _load(self) -> None:
         try:
@@ -1245,8 +1277,13 @@ def main() -> None:
     # Storage-History (Füllstände) — data-Ordner neben config (/netspy/data)
     data_dir = os.path.join(os.path.dirname(config_dir.rstrip("/")) or "/", "data")
     mon.storage_store = StorageStore(data_dir)
-    # Web-Terminal (ttyd): SSH auf die Ziele (eine ttyd-Instanz pro Ziel)
-    mon.term = TerminalManager(data_dir)
+    # Web-Terminal (ttyd): SSH auf die Ziele (eine ttyd-Instanz pro Ziel).
+    # TTYD_USER/TTYD_PASS schuetzen den Terminal-Tab (Login vor den iframes).
+    mon.term = TerminalManager(
+        data_dir,
+        ttyd_user=os.environ.get("TTYD_USER", ""),
+        ttyd_pass=os.environ.get("TTYD_PASS", ""),
+    )
     # Beim Start: leere servers.yaml-Vorlage anlegen (nur bei gemountetem
     # Volume) — sichtbarer Beweis auf dem Host, dass der Pfad korrekt ist.
     if init_config_template(config_dir):

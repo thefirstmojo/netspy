@@ -5,8 +5,8 @@
      Agent deployments on TrueNAS/Debian use the docker-compose.yml from the repo. -->
 <Container version="2">
   <Name>NetSpy</Name>
-  <Description>Live network + disk monitoring: per-interface, per-process and per-container throughput, disk I/O, CPU/RAM, latency and a settings page.</Description>
-  <Overview>Web dashboard showing real-time network + disk monitoring of Unraid (and other hosts): interface rates, per-process breakdown (incl. SMB sessions per client), per-container traffic, disk I/O per process, CPU/RAM per process and latency/health. One image, two roles — this template installs the web role; add agents on other hosts (TrueNAS/Debian) via the repo's docker-compose.yml.</Overview>
+  <Description>Live network + disk monitoring: per-interface, per-process and per-container throughput, disk I/O, CPU/RAM, latency, storage history and SSH terminals.</Description>
+  <Overview>Web dashboard showing real-time network + disk monitoring of Unraid (and other hosts): interface rates, per-process breakdown (incl. SMB sessions per client), per-container traffic, disk I/O per process, CPU/RAM per process, latency/health, storage fill-level history and SSH web terminals. One image, two roles — this template installs the web role; add agents on other hosts (TrueNAS/Debian) via the repo's docker-compose.yml.</Overview>
   <Category>Network:Management</Category>
   <ExtraSearchTerms>network monitor traffic throughput dashboard disk io cpu ram latency settings servers</ExtraSearchTerms>
   <ReadMe>https://raw.githubusercontent.com/thefirstmojo/netspy/main/README.md</ReadMe>
@@ -14,8 +14,8 @@
   <MaxVer>7.3</MaxVer>
   <License>MIT</License>
   <Screenshot>https://raw.githubusercontent.com/thefirstmojo/netspy/main/docs/screenshot.png</Screenshot>
-  <Date>2026-08-24</Date>
-  <Changes>v0.7.x: Storage tab as a file browser (all levels expandable, one tree per server, opt-in recording), fill-level history with rolling loops (24 h / 7 d / 12 months), chart tooltips with TB/GB values, persistent UI settings (active tab, card order, scale, time ranges), global time-range switch, drag &amp; drop. v0.7.3: RAM history chart (all servers in one graph, GB), server filter applies to every tab (charts, storage, RAM), RAM unit fixes. v0.7.4: CPU chart + 100% reference lines (installed RAM per server in server color). v0.7.5/0.7.6: chart stability + full-width line fixes</Changes>
+  <Date>2026-09-06</Date>
+  <Changes>v0.7.12: Terminal tab behind a login (TTYD_USER/TTYD_PASS — the terminals unlock only after logging in; dashboard stays open). v0.7.11: Terminal cards reorderable by drag &amp; drop, each terminal resizable (150-1000 px). v0.7.10: terminal input fix (ttyd -W), equal-scale button moved into the Network tab. v0.7.8: SSH terminal tab (ttyd, one terminal per target, sessions survive tab switches), mode-dependent storage chart labels. v0.7.7: storage charts update live every minute (file written hourly). v0.7.5/0.7.6: chart stability + full-width line fixes</Changes>
   <Repository>ghcr.io/thefirstmojo/netspy:latest</Repository>
   <Registry>https://github.com/users/thefirstmojo/packages/container/package/netspy</Registry>
   <Support>https://github.com/thefirstmojo/netspy/issues</Support>
@@ -39,6 +39,8 @@
   <Config Name="PORT:8090" Target="WEB_PORT" Default="8090" Mode="rw" Description="Host port of the web UI. Host networking: the value IS the host port." Type="Variable" Display="always" Required="false" Mask="false"/>
   <Config Name="PORT:8091" Target="AGENT_PORT" Default="8091" Mode="rw" Description="Host port of the agent API (used by other hosts' dashboards to poll this one). Host networking: the value IS the host port." Type="Variable" Display="always" Required="false" Mask="false"/>
   <Config Name="AGENT_TOKEN" Target="AGENT_TOKEN" Default="" Mode="rw" Description="Shared token for agent API access — must be identical on the web instance and every agent (set a long random value)." Type="Variable" Display="always" Required="true" Mask="true"/>
+  <Config Name="TTYD_USER" Target="TTYD_USER" Default="" Mode="rw" Description="SSH terminal tab login: username. The Terminal tab stays locked until both TTYD_USER and TTYD_PASS are set (the rest of the dashboard stays open). Leave both empty to disable the terminals." Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="TTYD_PASS" Target="TTYD_PASS" Default="" Mode="rw" Description="SSH terminal tab login: password (with TTYD_USER). Never stored — only compared against the credentials you type in the login form." Type="Variable" Display="always" Required="false" Mask="true"/>
   <Config Name="DOCKER_SOCK" Target="DOCKER_SOCK" Default="/var/run/docker.sock" Mode="rw" Description="Docker socket path for per-container rows. Keep the 'Docker Socket' path mapping below active; set to empty to disable." Type="Variable" Display="always" Required="false" Mask="false"/>
   <Config Name="Docker Socket" Target="/var/run/docker.sock" Default="/var/run/docker.sock" Mode="ro" Description="Mount the Docker socket (read-only) so container names appear in the process list (per-container throughput)." Type="Path" Display="always"/>
   <Config Name="Config Volume" Target="/netspy" Default="/mnt/user/appdata/netspy" Mode="rw" Description="Base directory for the settings page — servers.yaml is stored in the /netspy/config subfolder (created automatically). After install, make it world-writable on the host: chmod 777 /mnt/user/appdata/netspy (container runs as root with cap_drop ALL and needs write access)." Type="Path" Display="always"/>

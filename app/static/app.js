@@ -1583,15 +1583,102 @@ function termKey() {
   return JSON.stringify((d.targets || []).map(t => [t.name, t.port, t.host, t.user]));
 }
 
+/* Terminal-Tab-Login (TTYD_USER/TTYD_PASS): die iframes erscheinen erst nach
+   erfolgreichem Login. Login-Status nur in sessionStorage (ueberlebt Reload
+   im selben Tab, nicht das Schliessen des Browsers). */
+function termLoggedIn() {
+  try { return sessionStorage.getItem("netspy.termLogin") === "1"; } catch (e) { return false; }
+}
+
+function termLoginForm() {
+  return `<div class="termlogin">
+    <div style="font-size:15px;font-weight:600;margin-bottom:4px">🔒 SSH Terminal login</div>
+    <p class="hint">The dashboard (settings, charts) stays open, but the terminals unlock only with the <code>TTYD_USER</code> / <code>TTYD_PASS</code> credentials.</p>
+    <div class="termlogin-row">
+      <input id="tlogin-user" placeholder="Username" autocomplete="username" spellcheck="false">
+      <input id="tlogin-pass" type="password" placeholder="Password" autocomplete="current-password">
+      <button id="tlogin-btn" class="chip-btn">Login</button>
+    </div>
+    <div id="tlogin-msg" class="hint" style="margin-top:6px"></div>
+  </div>`;
+}
+
+function bindTermLogin() {
+  const btn = document.getElementById("tlogin-btn");
+  if (!btn) return;
+  const doLogin = async () => {
+    const u = document.getElementById("tlogin-user");
+    const p = document.getElementById("tlogin-pass");
+    const msg = document.getElementById("tlogin-msg");
+    if (!u.value || !p.value) { msg.textContent = "Enter username and password."; return; }
+    msg.textContent = "…";
+    try {
+      const r = await fetch("/api/terminal/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user: u.value, pass: p.value }),
+      });
+      if (r.ok) {
+        try { sessionStorage.setItem("netspy.termLogin", "1"); } catch (err) { /* still */ }
+        termState.lastKey = "";
+        loadTerminal();
+      } else {
+        msg.textContent = "❌ Invalid credentials — check TTYD_USER / TTYD_PASS.";
+        p.value = "";
+        p.focus();
+      }
+    } catch (e) {
+      msg.textContent = "❌ Login failed (server unreachable).";
+    }
+  };
+  btn.addEventListener("click", doLogin);
+  const u = document.getElementById("tlogin-user");
+  const p = document.getElementById("tlogin-pass");
+  u.addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+  p.addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+  u.focus();
+}
+
 async function loadTerminal() {
   await loadTermState();
   const grid = document.getElementById("termgrid");
   const info = document.getElementById("terminfo");
+  const ub = document.getElementById("termuserbar");
   if (!grid) return;
   const d = termState.data;
   if (!d) {
     grid.innerHTML = ""; info.innerHTML = `<p class="hint">Terminal not available.</p>`;
+    if (ub) ub.innerHTML = "";
     return;
+  }
+  // 1) Keine TTYD_USER/TTYD_PASS gesetzt -> Hinweis, was zu tun ist
+  if (!d.enabled) {
+    termState.lastKey = "";
+    grid.innerHTML = "";
+    info.innerHTML = "";
+    if (ub) ub.innerHTML =
+      `<p class="hint" style="color:#fbbf24">🔒 Terminal login not configured — set <code>TTYD_USER</code> and <code>TTYD_PASS</code> as container environment variables (Unraid: Docker → NetSpy → edit → apply), then recreate the container. Settings stay open; the Terminal tab stays locked until then.</p>`;
+    return;
+  }
+  // 2) Nicht eingeloggt -> Login-Formular
+  if (!termLoggedIn()) {
+    termState.lastKey = "";
+    grid.innerHTML = termLoginForm();
+    info.innerHTML = "";
+    if (ub) ub.innerHTML = `<p class="hint">🔒 Terminal tab is locked — log in to open the terminals.</p>`;
+    bindTermLogin();
+    return;
+  }
+  // 3) Eingeloggt -> Terminals (Kopfzeile mit Logout)
+  if (ub) {
+    ub.innerHTML = `<span class="hint">🔓 SSH terminals unlocked</span> ` +
+      `<button id="tlogout" class="chip-btn" title="Lock the terminals again">logout</button>`;
+    const lo = document.getElementById("tlogout");
+    if (lo) lo.addEventListener("click", () => {
+      try { sessionStorage.removeItem("netspy.termLogin"); } catch (err) { /* still */ }
+      termState.lastKey = "";
+      loadTerminal();
+    });
   }
   const k = termKey();
   // Konfig unveraendert -> iframes NICHT neu bauen (Verbindungen bleiben aktiv)
@@ -1720,8 +1807,9 @@ function renderTermSettings() {
     return;
   }
   syncTermEditor();
-  const status = d.error
-    ? `<p class="hint" style="color:#fbbf24">⚠️ ${esc(d.error)}</p>` : "";
+  const status = !d.enabled
+    ? `<p class="hint" style="color:#fbbf24">🔒 Terminal login not configured — set <code>TTYD_USER</code> and <code>TTYD_PASS</code> as container environment variables (Unraid: Docker → NetSpy → edit → apply), then recreate the container. The Terminal tab stays locked until then; you can still set up targets here.</p>`
+    : (d.error ? `<p class="hint" style="color:#fbbf24">⚠️ ${esc(d.error)}</p>` : "");
   const rows = termState.editor.map((e, i) => `
     <div class="sett-row term-row" data-i="${i}">
       <input class="sett-name" data-f="name" value="${esc(e.name)}" placeholder="Name (e.g. TrueNAS)">

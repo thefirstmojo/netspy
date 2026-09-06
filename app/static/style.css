@@ -233,6 +233,13 @@ footer .bmc-mini:hover { opacity: 1; color: var(--rx, #22d3ee); }
 .term-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
 .term-row textarea { width: 100%; background: var(--card); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 6px 8px; font: 11px monospace; }
 
+/* Terminal-Login-Karte (TTYD_USER/TTYD_PASS vor den iframes) */
+.termlogin { max-width: 420px; margin: 24px auto; border: 1px solid var(--border); border-radius: 12px; padding: 22px 24px; background: var(--card); text-align: center; }
+.termlogin-row { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; justify-content: center; }
+.termlogin-row input { flex: 1; min-width: 160px; background: var(--bg, #0b1120); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; }
+.termlogin-row input:focus { outline: none; border-color: var(--rx, #22d3ee); }
+.termlogin-row .chip-btn { padding: 8px 16px; }
+
 /* Storage-Dateibrowser: eine Sektion pro Server */
 .stsec { margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px 8px; background: var(--card); }
 .stsec summary { cursor: pointer; font-weight: 600; color: var(--muted); padding: 6px 0 2px; }

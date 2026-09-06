@@ -78,6 +78,14 @@ services:
       # Shared token — MUST be identical on the web instance and every agent
       AGENT_TOKEN: "CHANGE_ME"
 
+      # SSH Terminal tab login (web role). The Terminal tab shows a login form
+      # and only unlocks with these credentials (the dashboard itself stays
+      # open). Leave both empty to keep the terminals disabled.
+      # Note: this protects the dashboard's terminal UI; the ttyd ports
+      # (7681+) are reachable directly on the LAN — see README security note.
+      TTYD_USER: ""
+      TTYD_PASS: ""
+
       # Docker socket for per-container rows — only effective together with
       # the volumes block below. Empty string disables it (default for the
       # agent role).
