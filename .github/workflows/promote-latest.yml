@@ -31,5 +31,5 @@ jobs:
       - name: Promote version to :latest
         run: |
           docker buildx imagetools create \
-            ghcr.io/${{ github.repository }}:${{ inputs.version }} \
-            ghcr.io/${{ github.repository }}:latest
+            --tag ghcr.io/${{ github.repository }}:latest \
+            ghcr.io/${{ github.repository }}:${{ inputs.version }}
