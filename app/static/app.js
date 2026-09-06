@@ -1562,7 +1562,7 @@ setInterval(() => {
 }, 60000);
 
 /* ================= 🖥️ SSH Terminal (ttyd) ================= */
-let termState = { data: null, lastKey: "", editor: [] };
+let termState = { data: null, lastKey: "", editor: [], _editorSync: "" };
 
 async function loadTermState() {
   try {
@@ -1631,13 +1631,15 @@ function updateTermStatus() {
 
 /* ---------- Settings: Terminal-Ziel-Editor ---------- */
 function syncTermEditor() {
-  // Editor aus Server-Daten befuellen (nur einmal pro Datenstand)
+  // Editor nur neu befuellen, wenn die SERVER-DATEN sich geaendert haben.
+  // Lokale Editor-Aenderungen (add/remove/key) duerfen nicht ueberschrieben
+  // werden — sonst wirkt "Add target" wie ein No-Op.
   const d = termState.data;
   if (!d) return;
-  const targets = d.targets || [];
-  if (termState.editor.length === targets.length
-      && termState.editor.every((e, i) => e._name === targets[i].name)) return;
-  termState.editor = targets.map(t => ({
+  const sig = JSON.stringify((d.targets || []).map(t => [t.name, t.host, t.user, t.has_key]));
+  if (termState._editorSync === sig) return;
+  termState._editorSync = sig;
+  termState.editor = (d.targets || []).map(t => ({
     _name: t.name, name: t.name, host: t.host, user: t.user,
     has_key: t.has_key, showKey: false, keyText: "", deleteKey: false,
   }));
