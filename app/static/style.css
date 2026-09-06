@@ -217,7 +217,11 @@ footer { color: var(--muted); font-size: 11px; text-align: center; padding: 12px
 footer .bmc-mini { color: var(--muted); text-decoration: none; opacity: .75; transition: opacity .15s ease; }
 footer .bmc-mini:hover { opacity: 1; color: var(--rx, #22d3ee); }
 
-/* 🖥️ SSH Terminal (ttyd): eine Karte pro Ziel, iframes bleiben im DOM */
+/* 🖥️ SSH Terminal (ttyd): eine Karte pro Ziel, iframes bleiben im DOM.
+   display:flex + order statt DOM-Moves: appendChild verschieben laedt iframes
+   in Chromium NEU (contentWindow wechselt) -> SSH-Session weg. Nur die
+   order-Werte aendern laesst die Karten umsortieren OHNE Reload. */
+#termgrid { display: flex; flex-direction: column; }
 .termcard { margin: 10px 2px; border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; background: var(--card); }
 .termhead { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; cursor: grab; }
 .termhead:active { cursor: grabbing; }

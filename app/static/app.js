@@ -1693,8 +1693,8 @@ async function loadTerminal() {
     const ia = termOrder.indexOf(a.name), ib = termOrder.indexOf(b.name);
     return (ia === -1 ? 9999 : ia) - (ib === -1 ? 9999 : ib);
   });
-  grid.innerHTML = targets.map(t => `
-    <div class="termcard" data-name="${esc(t.name)}" draggable="true">
+  grid.innerHTML = targets.map((t, i) => `
+    <div class="termcard" data-name="${esc(t.name)}" draggable="true" style="order:${i}">
       <div class="termhead" title="drag to reorder">
         <span class="termdrag" aria-hidden="true">⠿</span>
         <b>${esc(t.name)}</b>
@@ -1749,7 +1749,10 @@ function bindTermDnD(grid) {
     grid.querySelectorAll(".termcard.dragover").forEach(c => c.classList.remove("dragover"));
     if (!dragName) return;
     const cards = [...grid.querySelectorAll(".termcard")];
-    const others = cards.filter(c => c.dataset.name !== dragName);
+    // Anzeige-Reihenfolge (CSS order), nicht DOM-Reihenfolge
+    const byOrder = (a, b) => (+(a.style.order || 0)) - (+(b.style.order || 0));
+    const ordered = cards.slice().sort(byOrder);
+    const others = ordered.filter(c => c.dataset.name !== dragName);
     if (!others.length) return;
     // Einfuegeposition aus der Cursor-Y-Position (vor der Karte, deren
     // obere Haelfte der Cursor passiert hat; sonst ans Ende)
@@ -1763,9 +1766,11 @@ function bindTermDnD(grid) {
     names.splice(idx, 0, dragName);
     termOrder = names;
     try { localStorage.setItem("netspy.termOrder", JSON.stringify(termOrder)); } catch (err) { /* still */ }
+    // NUR order-Werte aendern (KEIN DOM-Move!) — appendChild wuerde die
+    // iframes in Chromium neu laden und die SSH-Sessions killen.
     const byName = {};
     cards.forEach(c => { byName[c.dataset.name] = c; });
-    names.forEach(n => grid.appendChild(byName[n]));
+    names.forEach((n, i) => { byName[n].style.order = i; });
   });
 }
 
