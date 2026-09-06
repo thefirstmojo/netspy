@@ -1037,20 +1037,19 @@ class TerminalManager:
     - Private Keys: <data_dir>/ssh/<name> (chmod 600). Keys werden NIE im
       Klartext an die API zurueckgegeben — nur has_key.
     - Passwoerter werden bewusst NICHT gespeichert: ohne hinterlegten Key
-      fragt ssh im Terminal interaktiv nach dem Passwort.
-    - Schutz: TTYD_USER + TTYD_PASS (env). Ohne beide wird nichts gestartet
-      und die UI blendet den Terminal-Tab aus.
+      fragt ssh im Terminal interaktiv nach dem Passwort — DAS ist der
+      Zugriffsschutz der Ziele (die ttyd-Ebene selbst hat keine eigene Auth:
+      eingebettete Iframes koennen kein Basic-Auth-Popup; privates LAN +
+      SSH-Auth der Ziele, siehe README).
     - ttyd laeuft im Host-Netzwerk -> erreichbar unter http://<host>:PORT.
     """
 
     BASE_PORT = 7681
 
-    def __init__(self, data_dir: str, ttyd_user: str = "", ttyd_pass: str = ""):
+    def __init__(self, data_dir: str):
         self.data_dir = data_dir
         self.ssh_dir = os.path.join(data_dir, "ssh")
         self.cfg_path = os.path.join(data_dir, "terminal.json")
-        self.ttyd_user = ttyd_user
-        self.ttyd_pass = ttyd_pass
         self.lock = threading.Lock()
         self.targets: list = []   # [{"name","host","user","key"|None,"port"}]
         self.procs: dict = {}     # name -> subprocess.Popen
@@ -1060,7 +1059,8 @@ class TerminalManager:
 
     # -- Konfig -------------------------------------------------------------
     def enabled(self) -> bool:
-        return bool(self.ttyd_user and self.ttyd_pass)
+        # Keine separate Auth-Ebene mehr — siehe Klassen-Docstring.
+        return True
 
     def _load(self) -> None:
         try:
@@ -1158,7 +1158,9 @@ class TerminalManager:
         remote = ("command -v tmux >/dev/null 2>&1 && "
                   f"tmux new -A -s ns-{safe} || exec bash -l")
         cmd = ["ttyd", "-p", str(t["port"]),
-               "-c", f"{self.ttyd_user}:{self.ttyd_pass}",
+               # -W (--writable): OHNE dieses Flag startet ttyd read-only und
+               # verwirft jede Eingabe ("Terminal nimmt nichts an")!
+               "-W",
                "ssh", "-t",
                "-o", "UserKnownHostsFile=" + self._key_path("known_hosts"),
                "-o", "ConnectTimeout=10",
@@ -1243,12 +1245,8 @@ def main() -> None:
     # Storage-History (Füllstände) — data-Ordner neben config (/netspy/data)
     data_dir = os.path.join(os.path.dirname(config_dir.rstrip("/")) or "/", "data")
     mon.storage_store = StorageStore(data_dir)
-    # Web-Terminal (ttyd): SSH auf die Ziele; nur aktiv mit TTYD_USER/TTYD_PASS
-    mon.term = TerminalManager(
-        data_dir,
-        ttyd_user=os.environ.get("TTYD_USER", ""),
-        ttyd_pass=os.environ.get("TTYD_PASS", ""),
-    )
+    # Web-Terminal (ttyd): SSH auf die Ziele (eine ttyd-Instanz pro Ziel)
+    mon.term = TerminalManager(data_dir)
     # Beim Start: leere servers.yaml-Vorlage anlegen (nur bei gemountetem
     # Volume) — sichtbarer Beweis auf dem Host, dass der Pfad korrekt ist.
     if init_config_template(config_dir):

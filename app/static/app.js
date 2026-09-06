@@ -1589,11 +1589,6 @@ async function loadTerminal() {
     grid.innerHTML = ""; info.innerHTML = `<p class="hint">Terminal not available.</p>`;
     return;
   }
-  if (!d.enabled) {
-    grid.innerHTML = "";
-    info.innerHTML = `<p class="hint" style="color:#fbbf24">⚠️ <b>Terminal disabled</b> — set <code>TTYD_USER</code> and <code>TTYD_PASS</code> as container environment variables, then recreate the container. Without credentials the terminal stays off (security).</p>`;
-    return;
-  }
   const k = termKey();
   // Konfig unveraendert -> iframes NICHT neu bauen (Verbindungen bleiben aktiv)
   if (k === termState.lastKey && grid.children.length) {
@@ -1654,9 +1649,8 @@ function renderTermSettings() {
     return;
   }
   syncTermEditor();
-  const status = !d.enabled
-    ? `<p class="hint" style="color:#fbbf24">⚠️ Terminal disabled — set <code>TTYD_USER</code> and <code>TTYD_PASS</code> env vars (container recreate) to enable SSH terminals.</p>`
-    : (d.error ? `<p class="hint" style="color:#fbbf24">⚠️ ${esc(d.error)}</p>` : "");
+  const status = d.error
+    ? `<p class="hint" style="color:#fbbf24">⚠️ ${esc(d.error)}</p>` : "";
   const rows = termState.editor.map((e, i) => `
     <div class="sett-row term-row" data-i="${i}">
       <input class="sett-name" data-f="name" value="${esc(e.name)}" placeholder="Name (e.g. TrueNAS)">
@@ -1681,7 +1675,7 @@ function renderTermSettings() {
     </div>
     ${rows}
     <div class="sett-actions">
-      <button id="term-save" class="chip-btn ${d.enabled ? "" : ""}">💾 Save targets</button>
+      <button id="term-save" class="chip-btn">💾 Save targets</button>
       <span id="termsett-msg" class="hint"></span>
     </div>`;
   box.querySelectorAll("input[data-f], textarea[data-f]").forEach(inp => {

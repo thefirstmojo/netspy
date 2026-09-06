@@ -46,7 +46,8 @@ Real-time monitoring of your servers in one dashboard: **per-interface, per-proc
 - Terminals survive tab switches and browser reloads (tmux attach on the target when tmux is installed, plain login shell otherwise)
 - Targets are managed under **Settings → 🖥️ SSH Terminal**: name / host / user, optionally paste an SSH **private key** (stored `0600` in `/netspy/data/ssh`, never sent back to the browser)
 - **Passwords are never stored**: without a key, `ssh` asks for the password interactively right in the terminal
-- Access is guarded by `TTYD_USER` + `TTYD_PASS` (env) — **without both the terminal stays off** (security). Each terminal listens on a host port (7681, 7682, …; host networking) and is embedded at `http://<host-ip>:<port>` — the browser must reach the host directly (page + terminals same host).
+- Each terminal listens on a host port (7681, 7682, …; host networking) and is embedded at `http://<host-ip>:<port>`
+- **⚠️ Security: private LAN only.** The terminals have no login of their own (embedded iframes can't show a Basic-Auth prompt). Their protection is the **SSH authentication of the targets themselves**: without a stored key `ssh` demands the target's password interactively, and keys are only stored when you explicitly add them. Anyone who can open the dashboard can open a terminal — do **not** expose the dashboard (or ports 7681+) outside your trusted network.
 
 ![Disk I/O tab](docs/screenshots/disk-tab.png)
 
