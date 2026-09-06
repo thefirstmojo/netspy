@@ -28,10 +28,15 @@
       <button id="tabbtn-term" class="tabbtn" role="tab" aria-selected="false">🖥️ Terminal</button>
       <button id="tabbtn-settings" class="tabbtn" role="tab" aria-selected="false">🛠️ Settings</button>
     </div>
-    <button id="scalebtn" class="scalebtn" title="Force the same Y-axis scale on all charts (for direct comparison)">⚖ Equal scale</button>
   </div>
 
   <section id="panel-net" class="tabpanel">
+    <div style="display:flex;align-items:center;gap:8px;margin:4px 2px 8px">
+      <span class="hint">Y-axis:</span>
+      <span class="cpumode" title="Y-axis scale of the charts">
+        <button id="net-eq" class="chip-btn" title="Force the same Y-axis scale on all charts (for direct comparison)">⚖ Equal scale</button>
+      </span>
+    </div>
     <section id="chartgrid" class="chartgrid"></section>
 
     <section id="procdetail" class="chartgrid"></section>

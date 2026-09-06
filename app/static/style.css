@@ -173,13 +173,6 @@ tr[data-key] .pname { white-space: nowrap; }
 .sett-actions { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
 .sett-actions button { background: var(--card, #0f172a); border: 1px solid var(--border, rgba(148,163,184,.25)); color: var(--text, #e2e8f0); border-radius: 8px; padding: 7px 14px; cursor: pointer; font: inherit; font-size: 13px; }
 .sett-actions button.primary { background: rgba(34,211,238,.15); border-color: var(--rx, #22d3ee); color: var(--rx, #22d3ee); }
-.scalebtn {
-  background: var(--card); border: 1px solid var(--border); color: var(--muted);
-  border-radius: 999px; padding: 5px 14px; font-size: 13px; cursor: pointer;
-  font-family: inherit; white-space: nowrap;
-}
-.scalebtn:hover { border-color: var(--rx); color: var(--text); }
-.scalebtn.active { background: rgba(34,211,238,.12); border-color: var(--rx); color: var(--rx); }
 .chip {
   display: inline-flex; align-items: center; gap: 7px;
   background: var(--card); border: 1px solid var(--border);

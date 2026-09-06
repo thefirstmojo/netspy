@@ -252,9 +252,9 @@ function updateCharts(series) {
   }
 }
 
-document.getElementById("scalebtn").addEventListener("click", () => {
+document.getElementById("net-eq").addEventListener("click", () => {
   state.equalScale = !state.equalScale;
-  document.getElementById("scalebtn").classList.toggle("active", state.equalScale);
+  document.getElementById("net-eq").classList.toggle("active", state.equalScale);
   if (state.lastSeries) updateCharts(state.lastSeries);
   applyDetailScale();
 });
