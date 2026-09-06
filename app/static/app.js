@@ -1567,6 +1567,7 @@ let termOrder = [];   // Terminal-Karten-Reihenfolge (Drag & Drop, localStorage)
 let termHeights = {}; // Terminal-Höhen je Ziel (Resize, localStorage)
 try { termOrder = JSON.parse(localStorage.getItem("netspy.termOrder") || "[]"); } catch (e) { termOrder = []; }
 try { termHeights = JSON.parse(localStorage.getItem("netspy.termHeights") || "{}"); } catch (e) { termHeights = {}; }
+const TERM_DEFAULT_H = 340; // Standard-/Reset-Höhe eines Terminal-Frames
 
 async function loadTermState() {
   try {
@@ -1670,10 +1671,17 @@ async function loadTerminal() {
     bindTermLogin();
     return;
   }
-  // 3) Eingeloggt -> Terminals (Kopfzeile mit Logout)
+  // 3) Eingeloggt -> Terminals (Kopfzeile mit Logout + Größen-Reset)
   if (ub) {
     ub.innerHTML = `<span class="hint">🔓 SSH terminals unlocked</span> ` +
+      `<button id="tresetsizes" class="chip-btn" title="Reset all terminal window heights to the default">↺ reset sizes</button> ` +
       `<button id="tlogout" class="chip-btn" title="Lock the terminals again">logout</button>`;
+    const rs = document.getElementById("tresetsizes");
+    if (rs) rs.addEventListener("click", () => {
+      termHeights = {};
+      try { localStorage.removeItem("netspy.termHeights"); } catch (err) { /* still */ }
+      document.querySelectorAll(".termframe").forEach(f => f.style.height = TERM_DEFAULT_H + "px");
+    });
     const lo = document.getElementById("tlogout");
     if (lo) lo.addEventListener("click", () => {
       try { sessionStorage.removeItem("netspy.termLogin"); } catch (err) { /* still */ }
@@ -1702,7 +1710,7 @@ async function loadTerminal() {
         <span class="termstat ${t.running ? "ok" : "bad"}" data-port="${t.port}">${t.running ? "● active" : "○ offline"}</span>
       </div>
       <iframe class="termframe" data-port="${t.port}" src="http://${location.hostname}:${t.port}"
-        style="height:${termHeights[t.name] || 340}px"></iframe>
+        style="height:${termHeights[t.name] || TERM_DEFAULT_H}px"></iframe>
       <div class="termresize" title="drag to resize"></div>
     </div>`).join("") ||
     `<p class="hint">No terminal targets yet — add them in <b>Settings → 🖥️ SSH Terminal</b>.</p>`;
@@ -1774,7 +1782,11 @@ function bindTermDnD(grid) {
   });
 }
 
-/* Resize: Höhe des Terminals per Zug am Balken (150–1000 px, gespeichert) */
+/* Resize: Höhe des Terminals per Zug am Balken (150–1000 px, gespeichert).
+   Auto-Scroll: erreicht der Cursor beim Ziehen den oberen/unteren
+   Fensterrand, scrollt die Seite sanft nach (sonst lässt sich das unterste
+   Terminal nicht über den Viewport hinaus vergrößern). Speed steigt mit der
+   Eindringtiefe in die Randzone, aber bewusst langsam (2–6 px/Frame). */
 function bindTermResize() {
   document.querySelectorAll(".termresize").forEach(h => {
     h.addEventListener("pointerdown", e => {
@@ -1784,21 +1796,54 @@ function bindTermResize() {
       const name = card.dataset.name;
       const startY = e.clientY;
       const startH = frame.getBoundingClientRect().height;
+      let lastY = e.clientY, raf = null, active = true;
       try { h.setPointerCapture(e.pointerId); } catch (err) { /* still */ }
       const move = ev => {
+        lastY = ev.clientY;
         const nh = Math.max(150, Math.min(1000, startH + (ev.clientY - startY)));
         frame.style.height = nh + "px";
         termHeights[name] = nh;
       };
-      const up = () => {
+      // Sanfter Auto-Scroll-Loop: läuft nur während des Zugs. In der
+      // Randzone scrollt die Seite UND die Höhe wächst/schrumpft mit —
+      // der Resize-Balken bleibt so unter dem Cursor, der User kann die
+      // Karte auch dann weiter vergrößern, wenn die Maus am Fensterrand
+      // "klebt" (kein weiteres Maus-Delta mehr möglich).
+      const tick = () => {
+        raf = null;
+        if (!active) return;
+        const zone = 90, vh = window.innerHeight;
+        let dy = 0;
+        if (lastY < zone) {
+          // obere Randzone -> nach oben scrollen (kleinere Fenster)
+          dy = -Math.min(6, 2 + (zone - lastY) / 22);
+          window.scrollBy(0, dy);
+        } else if (lastY > vh - zone) {
+          // untere Randzone -> nach unten scrollen
+          dy = Math.min(6, 2 + (lastY - (vh - zone)) / 22);
+          window.scrollBy(0, dy);
+        }
+        if (dy) {
+          const cur = parseFloat(frame.style.height) || TERM_DEFAULT_H;
+          const nh = Math.max(150, Math.min(1000, cur + dy));
+          frame.style.height = nh + "px";
+          termHeights[name] = nh;
+        }
+        raf = requestAnimationFrame(tick);
+      };
+      const stop = () => {
+        active = false;
+        if (raf) cancelAnimationFrame(raf);
+        raf = null;
         h.removeEventListener("pointermove", move);
-        h.removeEventListener("pointerup", up);
-        h.removeEventListener("pointercancel", up);
+        h.removeEventListener("pointerup", stop);
+        h.removeEventListener("pointercancel", stop);
         try { localStorage.setItem("netspy.termHeights", JSON.stringify(termHeights)); } catch (err) { /* still */ }
       };
+      raf = requestAnimationFrame(tick);
       h.addEventListener("pointermove", move);
-      h.addEventListener("pointerup", up);
-      h.addEventListener("pointercancel", up);
+      h.addEventListener("pointerup", stop);
+      h.addEventListener("pointercancel", stop);
     });
   });
 }

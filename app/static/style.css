@@ -231,7 +231,7 @@ footer .bmc-mini:hover { opacity: 1; color: var(--rx, #22d3ee); }
 .termstat.bad { color: #f87171; }
 .termframe { width: 100%; height: 340px; border: 1px solid var(--border); border-radius: 8px; background: #0b1120; display: block; }
 /* Resize-Balken unter dem Terminal (Höhe ziehen) */
-.termresize { height: 12px; margin: 4px -10px -8px; border-radius: 0 0 10px 10px; cursor: ns-resize; display: flex; align-items: center; justify-content: center; gap: 3px; }
+.termresize { height: 12px; margin: 4px -10px -8px; border-radius: 0 0 10px 10px; cursor: ns-resize; display: flex; align-items: center; justify-content: center; gap: 3px; touch-action: none; }
 .termresize::before { content: ""; width: 40px; height: 3px; border-radius: 2px; background: rgba(148,163,184,.25); transition: background .15s ease; }
 .termresize:hover::before, .termresize:active::before { background: var(--rx, #22d3ee); }
 .term-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
