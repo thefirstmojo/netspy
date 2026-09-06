@@ -1593,10 +1593,11 @@ function termLoggedIn() {
 function termLoginForm() {
   return `<div class="termlogin">
     <div style="font-size:15px;font-weight:600;margin-bottom:4px">🔒 SSH Terminal login</div>
-    <p class="hint">The dashboard (settings, charts) stays open, but the terminals unlock only with the <code>TTYD_USER</code> / <code>TTYD_PASS</code> credentials.</p>
+    <p class="hint">The terminals are unlocked with the <b>container environment variables</b> <code>TTYD_USER</code> / <code>TTYD_PASS</code> — set on the NetSpy <b>container</b> (Unraid: Docker → NetSpy → <b>Edit</b> → Apply → Recreate), not in a NetSpy settings page. The dashboard (charts, settings) stays open either way.</p>
+    <p class="hint">Don't know the values? Check them under Docker → NetSpy → Edit — after changing them the container must be recreated. They are never stored in NetSpy itself.</p>
     <div class="termlogin-row">
-      <input id="tlogin-user" placeholder="Username" autocomplete="username" spellcheck="false">
-      <input id="tlogin-pass" type="password" placeholder="Password" autocomplete="current-password">
+      <input id="tlogin-user" placeholder="TTYD_USER" autocomplete="username" spellcheck="false">
+      <input id="tlogin-pass" type="password" placeholder="TTYD_PASS" autocomplete="current-password">
       <button id="tlogin-btn" class="chip-btn">Login</button>
     </div>
     <div id="tlogin-msg" class="hint" style="margin-top:6px"></div>
@@ -1623,7 +1624,7 @@ function bindTermLogin() {
         termState.lastKey = "";
         loadTerminal();
       } else {
-        msg.textContent = "❌ Invalid credentials — check TTYD_USER / TTYD_PASS.";
+        msg.innerHTML = "❌ Invalid credentials — the login uses the <b>container env vars</b> <code>TTYD_USER</code> / <code>TTYD_PASS</code> (Unraid: Docker → NetSpy → Edit). After changing them, recreate the container.";
         p.value = "";
         p.focus();
       }
