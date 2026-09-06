@@ -76,7 +76,8 @@ All values live directly in `docker-compose.yml` — no `.env` file.
 | `UPLINK` | auto (default route) | Comma-separated override, e.g. `br0,bond0` |
 | `WEB_PORT` / `AGENT_PORT` | `8090` / `8091` | Host ports (host networking — the values ARE the external ports) |
 | `AGENT_TOKEN` | empty | Shared `X-Agent-Token` header — **must match on all hosts** |
-| `TTYD_USER` / `TTYD_PASS` | empty | **Terminal tab login** (v0.7.12+): both set → the Terminal tab shows a login form and unlocks with these credentials; both empty → terminals stay disabled (tab shows a hint). Container env vars only — never stored in NetSpy, no settings-page option |
+| `TTYD_USER` | empty | **Terminal tab login — username** (v0.7.12+). Container env var only — never stored in NetSpy, no settings-page option. Set both `TTYD_USER` + `TTYD_PASS` → the Terminal tab shows a login form and unlocks with these credentials |
+| `TTYD_PASS` | empty | **Terminal tab login — password** (v0.7.12+). Container env var only — never stored in NetSpy. Both empty (`TTYD_USER` + `TTYD_PASS`) → terminals stay disabled (tab shows a hint); the rest of the dashboard stays open |
 | `DOCKER_SOCK` | `/var/run/docker.sock` (web) | Docker socket for per-container rows; `""` disables |
 | `CONFIG_DIR` | auto-detected | Volume for `servers.yaml` — `/netspy` mount → `/netspy/config` |
 
