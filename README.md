@@ -46,7 +46,7 @@ Real-time monitoring of your servers in one dashboard: **per-interface, per-proc
 - Terminals survive tab switches and browser reloads (tmux attach on the target when tmux is installed, plain login shell otherwise)
 - Targets are managed under **Settings → 🖥️ SSH Terminal** (stays open): name / host / user, optionally paste an SSH **private key** (stored `0600` in `/netspy/data/ssh`, never sent back to the browser)
 - **Passwords are never stored**: without a key, `ssh` asks for the password interactively right in the terminal
-- **Login (v0.7.12):** the Terminal tab is locked behind a login form that checks `TTYD_USER` + `TTYD_PASS` (container env) — the rest of the dashboard stays open. Without both variables set, the tab shows a hint instead of a login (and the terminals stay off). Log in once per browser session; a logout button is in the tab header.
+- **Login (v0.7.12):** the Terminal tab is locked behind a login form and only unlocks with the **Docker environment variables** `TTYD_USER` + `TTYD_PASS` of the NetSpy container — set them in the container's env (Unraid: **Docker → NetSpy → Edit → Apply**, then **recreate** the container; agents/Portainer: the stack's `environment:` block). They are **not** a NetSpy settings-page option and are never stored in NetSpy — the login form only compares what you type against them. Without both variables set the tab shows a hint instead of a login (terminals stay off); the rest of the dashboard stays open either way. Log in once per browser session; a logout button is in the tab header.
 - Each terminal listens on a host port (7681, 7682, …; host networking) and is embedded at `http://<host-ip>:<port>`
 - **⚠️ Security: private LAN only.** The login guards the dashboard's terminal tab; the ttyd ports themselves have no login of their own (embedded iframes can't show a Basic-Auth prompt) — so the actual protection of the servers is their **SSH authentication** (interactive password when no key is stored, keys only if you add them explicitly). Do **not** expose the dashboard or ports 7681+ outside your trusted network.
 
@@ -76,6 +76,7 @@ All values live directly in `docker-compose.yml` — no `.env` file.
 | `UPLINK` | auto (default route) | Comma-separated override, e.g. `br0,bond0` |
 | `WEB_PORT` / `AGENT_PORT` | `8090` / `8091` | Host ports (host networking — the values ARE the external ports) |
 | `AGENT_TOKEN` | empty | Shared `X-Agent-Token` header — **must match on all hosts** |
+| `TTYD_USER` / `TTYD_PASS` | empty | **Terminal tab login** (v0.7.12+): both set → the Terminal tab shows a login form and unlocks with these credentials; both empty → terminals stay disabled (tab shows a hint). Container env vars only — never stored in NetSpy, no settings-page option |
 | `DOCKER_SOCK` | `/var/run/docker.sock` (web) | Docker socket for per-container rows; `""` disables |
 | `CONFIG_DIR` | auto-detected | Volume for `servers.yaml` — `/netspy` mount → `/netspy/config` |
 
