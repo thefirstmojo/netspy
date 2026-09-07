@@ -1620,6 +1620,9 @@ const CMD_GROUPS = [
   { title: "TrueNAS", items: [
     { c: "zpool status", d: "Pool health: state of every vdev, last scrub and any read/write/checksum errors. Run this first when something feels wrong." },
     { c: "zpool status -v", d: "Same as above, plus the list of files with persistent errors (checksum/read/write)." },
+    { c: "zpool clear <pool>", d: "RESET the error counters (read/write/checksum) of a pool — the classic 'clear array errors' after a failed disk was fixed or a scrub ran clean. The pool then leaves its DEGRADED state if the device reports no more errors. Per device: zpool clear <pool> <device>." },
+    { c: "zpool online <pool> <device>", d: "Bring a disk back ONLINE after it was fixed/replaced (e.g. after zpool offline). Replace <device> with the disk (zpool status shows it)." },
+    { c: "zpool replace <pool> <old> <new>", d: "Replace a faulty disk with a new one and let ZFS rebuild (resilver) the data. Replace <old> and <new> with the disk IDs from zpool status." },
     { c: "zpool list", d: "Overview of all pools: size, used space, fragmentation and the current status." },
     { c: "zfs list", d: "List all datasets with used space, quotas and compression ratio." },
     { c: "zfs list -t snapshot", d: "List all snapshots and how much space each one occupies." },

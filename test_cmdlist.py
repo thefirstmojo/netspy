@@ -79,11 +79,12 @@ with sync_playwright() as pw:
                    "system, services & processes", "network",
                    "mover start", "mover stop", "mdcmd status", "nvidia-smi",
                    "zpool status", "zfs list -t snapshot", "zpool scrub <pool>",
-                   "smbstatus"]:
+                   "smbstatus", "zpool clear <pool>", "zpool online <pool> <device>",
+                   "zpool replace <pool> <old> <new>"]:
         check(f"enthält: {needle}", needle in txt)
     check("7 Gruppen", pg.locator("#cmdlist .cmdgtitle").count() == 7)
     n_items = pg.locator("#cmdlist .cmditem").count()
-    check(f"60 Einträge ({n_items})", n_items == 60)
+    check(f"63 Einträge ({n_items})", n_items == 63)
     check("keine Favoriten-Gruppe ohne Favs", "favorites" not in txt)
     check("cmdpanel sichtbar (default)",
           pg.eval_on_selector("#cmdpanel", "el => el.style.display !== 'none'"))
