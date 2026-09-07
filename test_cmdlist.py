@@ -76,11 +76,14 @@ with sync_playwright() as pw:
                    "filesystems & mounts", "journalctl -xe",
                    "fstrim -av", "mount -o remount,rw /", "docker ps -a",
                    "systemctl restart <service>", "ping -c 4 <host>", "ip route show",
-                   "system, services & processes", "network"]:
+                   "system, services & processes", "network",
+                   "mover start", "mover stop", "mdcmd status", "nvidia-smi",
+                   "zpool status", "zfs list -t snapshot", "zpool scrub <pool>",
+                   "smbstatus"]:
         check(f"enthält: {needle}", needle in txt)
-    check("5 Gruppen", pg.locator("#cmdlist .cmdgtitle").count() == 5)
+    check("7 Gruppen", pg.locator("#cmdlist .cmdgtitle").count() == 7)
     n_items = pg.locator("#cmdlist .cmditem").count()
-    check(f"45 Einträge ({n_items})", n_items == 45)
+    check(f"60 Einträge ({n_items})", n_items == 60)
     check("keine Favoriten-Gruppe ohne Favs", "favorites" not in txt)
     check("cmdpanel sichtbar (default)",
           pg.eval_on_selector("#cmdpanel", "el => el.style.display !== 'none'"))
