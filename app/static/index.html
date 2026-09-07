@@ -124,7 +124,18 @@
   <section id="panel-term" class="tabpanel hidden">
     <div id="terminfo" style="margin:8px 4px 0"></div>
     <div id="termuserbar" style="margin:6px 4px 0; min-height:22px"></div>
-    <div id="termgrid" style="padding:2px"></div>
+    <div class="termlayout">
+      <div class="termgridwrap"><div id="termgrid" style="padding:2px"></div></div>
+      <aside id="cmdpanel" class="cmdpanel" aria-label="Linux command cheat sheet">
+        <div class="cmdhead">
+          <b>Linux commands</b>
+          <span class="hint" title="click a command to copy it">⧉ copy</span>
+          <button id="cmdclose" class="chip-btn" title="Hide the command list">✕</button>
+        </div>
+        <div id="cmdlist"></div>
+      </aside>
+    </div>
+    <div id="cmdtiptip" class="cmdtiptip hidden"></div>
   </section>
 
   <section id="panel-settings" class="tabpanel hidden">

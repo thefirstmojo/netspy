@@ -1570,6 +1570,154 @@ try { termOrder = JSON.parse(localStorage.getItem("netspy.termOrder") || "[]"); 
 try { termHeights = JSON.parse(localStorage.getItem("netspy.termHeights") || "{}"); } catch (e) { termHeights = {}; }
 const TERM_DEFAULT_H = 340; // Standard-/Reset-Höhe eines Terminal-Frames
 
+/* ---------- Linux-Befehlsliste (Cheat-Sheet neben den Konsolen) ---------- */
+const CMD_GROUPS = [
+  { title: "Filesystems & mounts", items: [
+    { c: "mount -a", d: "Mount all filesystems from /etc/fstab — run it after editing fstab or when a boot skipped mounts." },
+    { c: "df -h", d: "Show disk usage of all mounted filesystems, human-readable sizes." },
+    { c: "lsblk", d: "List block devices: drives, partitions and their mount points." },
+    { c: "du -sh *", d: "Show the total size of every file/folder in the current directory." },
+  ]},
+  { title: "Packages (APT — Debian/Ubuntu)", items: [
+    { c: "apt-get update", d: "Refresh the package index from the configured repositories." },
+    { c: "apt-get upgrade -y", d: "Install all available upgrades of installed packages (-y: no prompt). Keeps installed/removed set unchanged." },
+    { c: "apt-get dist-upgrade -y", d: "Like upgrade, but may also install/remove packages when dependencies demand it." },
+    { c: "apt-get autoremove --purge -y", d: "Remove packages that are no longer needed, incl. their config files." },
+    { c: "apt-get clean", d: "Delete cached .deb files from /var/cache/apt to free disk space." },
+    { c: "apt-get install <package>", d: "Install a package. Replace <package> with the real name (e.g. apt-get install tmux)." },
+  ]},
+  { title: "Docker cleanup", items: [
+    { c: "docker system df", d: "Disk-usage overview: how much images, containers, volumes and build cache occupy." },
+    { c: "docker container prune -f", d: "Remove ALL stopped containers (-f: no confirmation prompt)." },
+    { c: "docker image prune -a -f", d: "Remove every image no container uses — also keeps only images of running containers." },
+    { c: "docker volume prune -f", d: "Remove volumes not referenced by any container (only dangling volumes)." },
+    { c: "docker network prune -f", d: "Remove custom networks not used by any container." },
+    { c: "docker builder prune -f", d: "Clear the Docker build cache (often the biggest hidden space eater)." },
+    { c: "docker system prune -f", d: "Classic cleanup: stopped containers, unused networks, dangling images and build cache." },
+    { c: "docker system prune -a -f", d: "Full cleanup: everything prune -f does, PLUS all images that no container uses." },
+    { c: "docker system prune -a -f --volumes", d: "Maximum cleanup — additionally removes unused volumes. ⚠️ Volumes can hold data: only run when you are sure." },
+  ]},
+  { title: "System, logs & network", items: [
+    { c: "journalctl -xe", d: "Show recent systemd logs; -x explains the entries, -e jumps to the newest messages." },
+    { c: "systemctl status", d: "Overview of the systemd state and the most important services." },
+    { c: "free -h", d: "Show RAM + swap usage, human-readable." },
+    { c: "htop", d: "Interactive process viewer with CPU/RAM bars (install first: apt-get install htop)." },
+    { c: "ip a", d: "Show all network interfaces and their IP addresses." },
+    { c: "ss -tulpn", d: "List listening/established TCP+UDP sockets with the owning process (-p needs root)." },
+    { c: "uptime", d: "How long the system has been running plus the current load average." },
+  ]},
+];
+
+let cmdOpen = true;   // Befehlsliste sichtbar?
+try { cmdOpen = localStorage.getItem("netspy.cmdPanel") !== "0"; } catch (e) { /* still */ }
+
+function renderCmdList() {
+  const box = document.getElementById("cmdlist");
+  if (!box) return;
+  box.innerHTML = CMD_GROUPS.map(g =>
+    `<div class="cmdgroup"><div class="cmdgtitle">${esc(g.title)}</div>` +
+    g.items.map(it =>
+      `<div class="cmditem" data-desc="${esc(it.d)}">` +
+      `<code>${esc(it.c)}</code>` +
+      `<button class="cmdcopy" title="copy to clipboard">⧉</button></div>`).join("") +
+    `</div>`).join("");
+  // Copy: Klick auf den ⧉-Button (und auf den Code selbst) -> Clipboard
+  box.querySelectorAll(".cmditem").forEach(row => {
+    const copyBtn = () => {
+      const code = row.querySelector("code").textContent;
+      copyText(code).then(ok => {
+        const btn = row.querySelector(".cmdcopy");
+        if (!btn) return;
+        const old = btn.textContent;
+        btn.textContent = ok ? "✓" : "✗";
+        btn.classList.toggle("copied", ok);
+        setTimeout(() => { btn.textContent = old; btn.classList.remove("copied"); }, 1300);
+      });
+    };
+    row.querySelector(".cmdcopy").addEventListener("click", copyBtn);
+    row.querySelector("code").addEventListener("click", copyBtn);
+  });
+  // Hover-Beschreibung: fixed-Tooltip (nicht vom scrollenden Panel abgeschnitten)
+  const tip = document.getElementById("cmdtiptip");
+  if (!tip) return;
+  box.querySelectorAll(".cmditem").forEach(row => {
+    row.addEventListener("mouseenter", e => {
+      tip.textContent = row.dataset.desc || "";
+      tip.classList.remove("hidden");
+      moveTip(e);
+    });
+    row.addEventListener("mousemove", moveTip);
+    row.addEventListener("mouseleave", () => tip.classList.add("hidden"));
+  });
+}
+
+function moveTip(e) {
+  const tip = document.getElementById("cmdtiptip");
+  if (!tip) return;
+  const pad = 14;
+  let x = e.clientX + pad, y = e.clientY + pad;
+  const r = tip.getBoundingClientRect();
+  if (x + r.width > window.innerWidth - 8) x = e.clientX - r.width - pad;
+  if (y + r.height > window.innerHeight - 8) y = e.clientY - r.height - pad;
+  tip.style.left = x + "px";
+  tip.style.top = y + "px";
+}
+
+async function copyText(t) {
+  // navigator.clipboard braucht einen secure context (https/localhost);
+  // im LAN (http://192.168.x.x) fallback auf execCommand.
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(t);
+      return true;
+    }
+  } catch (e) { /* fall through */ }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = t;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  } catch (e2) { return false; }
+}
+
+/* Befehlsliste ein-/ausblenden (Zustand in localStorage) */
+function applyCmdPanel() {
+  const panel = document.getElementById("cmdpanel");
+  const tip = document.getElementById("cmdtiptip");
+  if (!panel) return;
+  panel.style.display = cmdOpen ? "" : "none";
+  if (!cmdOpen && tip) tip.classList.add("hidden");
+}
+
+function initCmdPanel() {
+  renderCmdList();
+  applyCmdPanel();
+  const close = document.getElementById("cmdclose");
+  if (close) close.addEventListener("click", () => {
+    cmdOpen = false;
+    try { localStorage.setItem("netspy.cmdPanel", "0"); } catch (e) { /* still */ }
+    applyCmdPanel();
+  });
+  // 📋-Button (wird je Terminal-Tab-Zustand neu gerendert): Toggle per Delegation
+  document.addEventListener("click", e => {
+    const t = e.target && e.target.closest ? e.target.closest("#cmdopen") : null;
+    if (!t) return;
+    cmdOpen = !cmdOpen;
+    try { localStorage.setItem("netspy.cmdPanel", cmdOpen ? "1" : "0"); } catch (err) { /* still */ }
+    applyCmdPanel();
+  });
+}
+
+const CMDTOGGLE = `<button id="cmdopen" class="chip-btn" title="Show or hide the Linux command list next to the terminals">📋 commands</button> `;
+
+initCmdPanel();
+
 async function loadTermState() {
   try {
     const r = await fetch("/api/terminal");
@@ -1659,7 +1807,7 @@ async function loadTerminal() {
     termState.lastKey = "";
     grid.innerHTML = "";
     info.innerHTML = "";
-    if (ub) ub.innerHTML =
+    if (ub) ub.innerHTML = CMDTOGGLE +
       `<p class="hint" style="color:#fbbf24">🔒 Terminal login not configured — set <code>TTYD_USER</code> and <code>TTYD_PASS</code> as container environment variables (Unraid: Docker → NetSpy → edit → apply), then recreate the container. Settings stay open; the Terminal tab stays locked until then.</p>`;
     return;
   }
@@ -1668,13 +1816,14 @@ async function loadTerminal() {
     termState.lastKey = "";
     grid.innerHTML = termLoginForm();
     info.innerHTML = "";
-    if (ub) ub.innerHTML = `<p class="hint">🔒 Terminal tab is locked — log in to open the terminals.</p>`;
+    if (ub) ub.innerHTML = CMDTOGGLE + `<p class="hint">🔒 Terminal tab is locked — log in to open the terminals.</p>`;
     bindTermLogin();
     return;
   }
   // 3) Eingeloggt -> Terminals (Kopfzeile mit Logout + Größen-Reset)
   if (ub) {
     ub.innerHTML = `<span class="hint">🔓 SSH terminals unlocked</span> ` +
+      CMDTOGGLE +
       `<button id="tresetsizes" class="chip-btn" title="Reset all terminal window heights to the default">↺ reset sizes</button> ` +
       `<button id="tlogout" class="chip-btn" title="Lock the terminals again">logout</button>`;
     const rs = document.getElementById("tresetsizes");

@@ -240,6 +240,42 @@ footer .bmc-mini:hover { opacity: 1; color: var(--rx, #22d3ee); }
 #termgrid.termdrag-active .termcard { cursor: grabbing; }
 .termcard.dragover { border-color: var(--rx, #22d3ee); box-shadow: 0 0 0 1px var(--rx, #22d3ee); }
 
+/* Terminal-Layout: Karten links (flexibel), Befehlsliste rechts (einklappbar) */
+.termlayout { display: flex; align-items: flex-start; gap: 8px; margin-top: 4px; }
+.termgridwrap { flex: 1; min-width: 0; }
+.cmdpanel { width: 320px; max-width: 45vw; flex-shrink: 0; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--card); margin: 10px 2px; overflow: hidden; }
+.cmdhead { display: flex; align-items: center; gap: 6px; padding: 8px 10px;
+  border-bottom: 1px solid var(--border); font-size: 12px; }
+.cmdhead b { color: var(--text); }
+.cmdhead .hint { margin-left: auto; }
+#cmdlist { max-height: 62vh; overflow-y: auto; padding: 4px 6px 10px; }
+.cmdgroup { margin-top: 8px; }
+.cmdgroup > .cmdgtitle { font-size: 11px; text-transform: uppercase; letter-spacing: .4px;
+  color: var(--rx, #22d3ee); padding: 6px 6px 2px; font-weight: 600; }
+.cmditem { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 7px;
+  cursor: default; }
+.cmditem:hover { background: rgba(148,163,184,.08); }
+.cmditem code { flex: 1; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px; color: #a5f3fc; word-break: break-all; user-select: text; white-space: pre-wrap; }
+.cmditem button { flex-shrink: 0; background: transparent; border: 1px solid var(--border);
+  color: #94a3b8; border-radius: 6px; padding: 2px 7px; font: inherit; font-size: 11px;
+  cursor: pointer; line-height: 1.5; }
+.cmditem button:hover { border-color: var(--rx, #22d3ee); color: #e2e8f0; }
+.cmditem button.copied { border-color: #4ade80; color: #4ade80; }
+/* Hover-Beschreibung: kleines Fixed-Tooltip neben der Maus */
+.cmdtiptip { position: fixed; z-index: 9999; pointer-events: none; max-width: 320px;
+  background: #0f172a; border: 1px solid rgba(148,163,184,.35); color: #e2e8f0;
+  border-radius: 8px; padding: 6px 9px; font-size: 11.5px; line-height: 1.45;
+  box-shadow: 0 6px 18px rgba(0,0,0,.45); }
+@media (max-width: 900px) {
+  .cmdpanel { width: 260px; }
+}
+@media (max-width: 700px) {
+  .termlayout { flex-direction: column; }
+  .cmdpanel { width: 100%; max-width: none; }
+}
+
 /* Terminal-Login-Karte (TTYD_USER/TTYD_PASS vor den iframes) */
 .termlogin { max-width: 420px; margin: 24px auto; border: 1px solid var(--border); border-radius: 12px; padding: 22px 24px; background: var(--card); text-align: center; }
 .termlogin-row { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; justify-content: center; }
