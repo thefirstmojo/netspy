@@ -1763,6 +1763,14 @@ function showTip(row, x, y) {
   }, TIP_DELAY);
 }
 
+/* Zeile unter einer Bildschirmkoordinate (elementFromPoint). Liefert null,
+   wenn dort keine Befehlszeile liegt — auch fuer Koordinaten ueber iframes. */
+function baseRowAt(x, y) {
+  if (x == null || y == null) return null;
+  const el = document.elementFromPoint(x, y);
+  return el && el.closest ? el.closest(".cmditem") : null;
+}
+
 function bindCmdTip() {
   const box = document.getElementById("cmdlist");
   if (!box) return;
@@ -1783,6 +1791,19 @@ function bindCmdTip() {
     const row = e.target && e.target.closest ? e.target.closest(".cmditem") : null;
     if (row && row === tipRowEl) positionTip(e.clientX, e.clientY);
   });
+  /* MAUS-TRACKER im Hauptfenster (capture): document-mousemove feuert auch,
+     wenn die Maus ueber iframes laeuft oder Koordinaten ausserhalb der Zeile
+     hat. Bei JEDER Bewegung wird die Zeile unter dem Cursor bestimmt:
+     - keine Zeile   -> sofort ausblenden (Fenster/Feld verlassen)
+     - andere Zeile  -> bisherigen weg, neuen nach Delay
+     Damit verschwindet der Tooltip auch bei verlorenen mouseout-Events
+     (schnelles Verlassen, noVNC) sofort. */
+  document.addEventListener("mousemove", e => {
+    if (!tipRowEl && tipShowTimer === null && tipHideTimer === null) return;
+    const row = baseRowAt(e.clientX, e.clientY);
+    if (!row) { cancelTip(); hideCmdTip(); }
+    else if (row !== tipRowEl) showTip(row, e.clientX, e.clientY);
+  }, { capture: true, passive: true });
   // Sicherheitsnetze: Liste verlassen, Fenster verlassen, scrollen, blur/tab
   box.addEventListener("mouseleave", () => { cancelTip(); hideCmdTip(); });
   box.addEventListener("scroll", () => { cancelTip(); hideCmdTip(); }, { passive: true });
@@ -1796,6 +1817,21 @@ function bindCmdTip() {
   document.addEventListener("mouseout", e => {
     if (!e.relatedTarget) { cancelTip(); hideCmdTip(); }
   });
+  /* WATCHDOG (periodisch, nur solange der Tooltip sichtbar/aktiv ist):
+     laeuft ganz ohne neue Maus-Events und prueft alle 150 ms per
+     elementFromPoint, ob die Maus noch ueber der Ziel-Zeile liegt. Deckt
+     damit alle Faelle ohne Events ab (Maus aus dem Fenster, Scroll unter
+     statischem Cursor) — der Tooltip verschwindet binnen ~150 ms. */
+  let tipLastX = 0, tipLastY = 0;
+  const trackPos = e => { tipLastX = e.clientX; tipLastY = e.clientY; };
+  document.addEventListener("mousemove", trackPos, { capture: true, passive: true });
+  setInterval(() => {
+    const tip = document.getElementById("cmdtiptip");
+    if (!tip) return;
+    if (tip.classList.contains("hidden") && !tipShowTimer && !tipHideTimer) return;
+    const row = baseRowAt(tipLastX, tipLastY);
+    if (!row || row !== tipRowEl) { cancelTip(); hideCmdTip(); }
+  }, 150);
 }
 
 async function copyText(t) {
