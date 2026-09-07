@@ -82,9 +82,9 @@ with sync_playwright() as pw:
                    "smbstatus", "zpool clear <pool>", "zpool online <pool> <device>",
                    "zpool replace <pool> <old> <new>"]:
         check(f"enthält: {needle}", needle in txt)
-    check("7 Gruppen", pg.locator("#cmdlist .cmdgtitle").count() == 7)
+    check("8 Gruppen", pg.locator("#cmdlist .cmdgtitle").count() == 8)
     n_items = pg.locator("#cmdlist .cmditem").count()
-    check(f"63 Einträge ({n_items})", n_items == 63)
+    check(f"77 Einträge ({n_items})", n_items == 77)
     check("keine Favoriten-Gruppe ohne Favs", "favorites" not in txt)
     check("cmdpanel sichtbar (default)",
           pg.eval_on_selector("#cmdpanel", "el => el.style.display !== 'none'"))

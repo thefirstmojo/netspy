@@ -1642,6 +1642,24 @@ const CMD_GROUPS = [
     { c: "htop", d: "Interactive process viewer with CPU/RAM bars (install first: apt-get install htop)." },
     { c: "uptime", d: "How long the system has been running plus the current load average." },
   ]},
+  { title: "Processes — find & kill", items: [
+    // Identifizieren (PID finden, bevor man killt)
+    { c: "ps -ef", d: "Full process list: PID (2nd column) + parent — the standard overview." },
+    { c: "ps aux | grep -v grep | grep <name>", d: "Show the process line(s) for a program; the PID is in the 2nd column. Replace <name> (e.g. docker)." },
+    { c: "pgrep -la <name>", d: "Print the PID(s) + command of matching processes — the quickest way to get a PID. Replace <name>." },
+    { c: "pgrep -a python3", d: "List every running python3 process with its PID, ready to kill." },
+    { c: "pidof <name>", d: "Just the PID(s) of ONE program (e.g. pidof docker) — no extra text." },
+    { c: "ss -tulpn", d: "Listening/established sockets WITH the owning process — which PID holds which port." },
+    { c: "lsof -i :<port>", d: "Which process is bound to a TCP/UDP port (PID shown). Replace <port>; needs lsof installed." },
+    { c: "readlink /proc/<pid>/exe", d: "Resolve a PID to its executable path — confirm what a process really is before killing it." },
+    { c: "top", d: "Live process list (CPU/RAM) — press 'q' to quit; note the PID column." },
+    // Killen
+    { c: "kill -9 <pid>", d: "FORCE-kill one process (SIGKILL, cannot be caught) — use only when a normal kill fails. ⚠️ Unsaved data is lost." },
+    { c: "kill <pid>", d: "Graceful kill (SIGTERM) — the process can clean up first. Try this before -9." },
+    { c: "killall -9 <name>", d: "Force-kill EVERY process with that name (e.g. killall -9 firefox). ⚠️ Kills all matches." },
+    { c: "pkill -9 -f <pattern>", d: "Force-kill processes matching a pattern in their full command line. ⚠️ -f matches broadly — verify first." },
+    { c: "kill -9 $(pgrep -f <name>)", d: "One-liner: find every matching PID and force-kill them at once. ⚠️ Check the matched PIDs first." },
+  ]},
   { title: "Network", items: [
     { c: "ip a", d: "Show all network interfaces and their IP addresses." },
     { c: "ip route show", d: "Show the routing table — which gateway leads where (the default route is the uplink)." },
