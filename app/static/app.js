@@ -1706,19 +1706,21 @@ function renderCmdList() {
   });
 }
 
-/* Hover-Beschreibung mit 1-s-Delay: erst wenn die Maus eine Zeile lang
-   ruht, poppt der Tooltip auf. Verlassen der Zeile/Liste, Scrollen (Liste
-   oder Seite), Fenster-Blur/Tab-Wechsel verstecken ihn SOFORT und brechen
-   den Timer — beim schnellen Durchscrollen poppt nichts auf, und ein
-   verlorenes mouseleave kann den Tooltip nicht mehr einfrieren: ein
-   document-weiter mousemove-Tracker (elementFromPoint) versteckt ihn bei
-   JEDER Bewegung ausserhalb einer Zeile. */
-let tipTimer = null;
+/* Hover-Beschreibung — Tippy-'groups'-Muster, bewusst einfach:
+   - mouseenter auf einer Zeile: bisherigen SOFORT verbergen, neuen nach 1 s zeigen
+   - mouseleave der Zeile: SOFORT verbergen (kein Delay beim Verstecken)
+   - Zeilenwechsel = mouseleave A + mouseenter B -> A weg, B nach Delay
+   - Lebensdauer-Fallback: nach dem Anzeigen blendet ein 5-s-Timer ihn von
+     selbst aus (deckt "keine Events mehr" ab, z. B. Maus verlaesst das
+     Fenster via noVNC). Jede neue Zeile setzt beide Timer neu.
+   - Sicherheitsnetze: List-/Fenster-mouseleave, Scroll, Blur, Tab-Wechsel,
+     mouseout mit relatedTarget=null -> sofort weg. */
+let tipShowTimer = null;
+let tipHideTimer = null;
 let tipRowEl = null;
-let tipX = -1, tipY = -1;   // letzte bekannte Mausposition (Watchdog)
-let tipLastMove = 0;        // Zeitstempel der letzten Mausbewegung
+let tipX = -1, tipY = -1;
 const TIP_DELAY = 1000;
-const TIP_STALE = 5000;     // ohne Mausbewegung blendet sich der Tooltip selbst aus
+const TIP_STALE = 5000;
 
 function hideCmdTip() {
   const tip = document.getElementById("cmdtiptip");
@@ -1726,7 +1728,8 @@ function hideCmdTip() {
 }
 
 function cancelTip() {
-  if (tipTimer) { clearTimeout(tipTimer); tipTimer = null; }
+  if (tipShowTimer) { clearTimeout(tipShowTimer); tipShowTimer = null; }
+  if (tipHideTimer) { clearTimeout(tipHideTimer); tipHideTimer = null; }
   tipRowEl = null;
 }
 
@@ -1742,88 +1745,57 @@ function positionTip(x, y) {
   tip.style.top = py + "px";
 }
 
-/* Zeile unter dem Cursor (auch ueber iframes hinweg — elementFromPoint
-   liefert dort das iframe-Element, closest findet keine .cmditem). */
-function tipRowFrom(e) {
-  const el = (document.elementFromPoint && e.clientX != null)
-    ? document.elementFromPoint(e.clientX, e.clientY) : e.target;
-  return el && el.closest ? el.closest(".cmditem") : null;
-}
-
-function armTip(row, x, y) {
-  if (tipRowEl === row && tipTimer) return;   // Timer fuer diese Zeile laeuft schon
-  cancelTip();
-  hideCmdTip();   // Zeilenwechsel: alter Tooltip sofort weg, neuer erst nach Delay
+function showTip(row, x, y) {
   tipRowEl = row;
-  tipTimer = setTimeout(() => {
-    tipTimer = null;
+  tipX = x; tipY = y;
+  hideCmdTip();   // Zeilenwechsel: alter Tooltip sofort weg
+  if (tipShowTimer) clearTimeout(tipShowTimer);
+  if (tipHideTimer) clearTimeout(tipHideTimer);
+  tipShowTimer = setTimeout(() => {
+    tipShowTimer = null;
     const tip = document.getElementById("cmdtiptip");
     if (!tip || !tipRowEl || !tipRowEl.isConnected) return;
     tip.textContent = tipRowEl.dataset.desc || "";
     tip.classList.remove("hidden");
     positionTip(x, y);
+    // Lebensdauer: ganz ohne weitere Events verschwindet er nach TIP_STALE
+    tipHideTimer = setTimeout(() => { cancelTip(); hideCmdTip(); }, TIP_STALE);
   }, TIP_DELAY);
 }
 
 function bindCmdTip() {
   const box = document.getElementById("cmdlist");
   if (!box) return;
+  // Delegation (mouseover/mouseout bubbeln) statt pro-Zeile-Listener: ueberlebt
+  // das Neu-Rendern der Liste (Favoriten-Toggle) ohne Re-Bind.
   box.addEventListener("mouseover", e => {
     const row = e.target && e.target.closest ? e.target.closest(".cmditem") : null;
-    if (row) armTip(row, e.clientX, e.clientY);
+    if (row && row !== tipRowEl) showTip(row, e.clientX, e.clientY);
   });
-  // Sichtbarer Tooltip folgt der Maus nur innerhalb der Zeile
+  box.addEventListener("mouseout", e => {
+    const from = e.target && e.target.closest ? e.target.closest(".cmditem") : null;
+    const to = e.relatedTarget && e.relatedTarget.closest
+      ? e.relatedTarget.closest(".cmditem") : null;
+    if (from && to !== from) { cancelTip(); hideCmdTip(); }
+  });
+  // sichtbarer Tooltip folgt der Maus waehrend sie auf derselben Zeile bleibt
   box.addEventListener("mousemove", e => {
-    if (tipTimer === null) {
-      const tip = document.getElementById("cmdtiptip");
-      if (tip && !tip.classList.contains("hidden") && tipRowEl) positionTip(e.clientX, e.clientY);
-    }
+    const row = e.target && e.target.closest ? e.target.closest(".cmditem") : null;
+    if (row && row === tipRowEl) positionTip(e.clientX, e.clientY);
   });
-  // Jede Mausbewegung im Dokument: ausserhalb einer Zeile -> sofort weg
-  document.addEventListener("mousemove", e => {
-    tipX = e.clientX; tipY = e.clientY;
-    tipLastMove = Date.now();
-    const row = tipRowFrom(e);
-    if (!row) { cancelTip(); hideCmdTip(); }
-    else if (row !== tipRowEl) armTip(row, e.clientX, e.clientY);
-  }, { passive: true });
+  // Sicherheitsnetze: Liste verlassen, Fenster verlassen, scrollen, blur/tab
   box.addEventListener("mouseleave", () => { cancelTip(); hideCmdTip(); });
-  // Scrollen verdeckt Inhalte -> Tooltip sofort zu + Timer weg
   box.addEventListener("scroll", () => { cancelTip(); hideCmdTip(); }, { passive: true });
   window.addEventListener("scroll", () => { cancelTip(); hideCmdTip(); }, { passive: true });
   window.addEventListener("blur", () => { cancelTip(); hideCmdTip(); });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) { cancelTip(); hideCmdTip(); }
   });
-  // Maus verlaesst das FENSTER: das letzte mouseout hat relatedTarget=null.
-  // (zuverlaessiger als mouseleave auf document; auch bei schnellen Uebergaengen)
+  // Maus verlaesst das FENSTER: mouseout mit relatedTarget=null (zuverlaessig,
+  // auch bei schnellen Uebergaengen)
   document.addEventListener("mouseout", e => {
     if (!e.relatedTarget) { cancelTip(); hideCmdTip(); }
   });
-  /* WATCHDOG (Strategie: nicht auf Maus-Events verlassen): solange der
-     Tooltip sichtbar ist oder ein Timer laeuft, prueft ein 200-ms-Intervall,
-     ob die Maus noch ueber der Ziel-Zeile liegt (elementFromPoint an der
-     letzten bekannten Mausposition). Damit werden AUCH Faelle ohne
-     Mausbewegung erkannt: Scrollen unter statischem Cursor (die Zeile
-     wandert unter der Maus weg) oder verlorene Events — der Tooltip
-     verschwindet dann spätestens nach ~200 ms.
-     ZUSAETZLICH Lebensdauer: Wenn die Maus das FENSTER verlaesst (noVNC/
-     VNC: die Seite bekommt danach gar keine Events mehr, die letzte
-     Position bleibt auf der Zeile stehen), blendet sich der Tooltip nach
-     TIP_STALE ms ohne jede Mausbewegung von selbst aus — er kann damit
-     prinzipiell nicht mehr dauerhaft kleben. Minimale Mausbewegung auf der
-     Zeile (z. B. beim Lesen) haelt ihn frisch. */
-  setInterval(() => {
-    const tip = document.getElementById("cmdtiptip");
-    const active = tip && (!tip.classList.contains("hidden") || tipTimer);
-    if (!active || tipX < 0) return;
-    const el = document.elementFromPoint(tipX, tipY);
-    const row = el && el.closest ? el.closest(".cmditem") : null;
-    if (!row || row !== tipRowEl) { cancelTip(); hideCmdTip(); }
-    else if (!tip.classList.contains("hidden") && Date.now() - tipLastMove > TIP_STALE) {
-      cancelTip(); hideCmdTip();
-    }
-  }, 200);
 }
 
 async function copyText(t) {

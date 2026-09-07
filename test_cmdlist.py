@@ -151,17 +151,6 @@ with sync_playwright() as pw:
     pg.wait_for_timeout(1000)
     tip2 = pg.locator("#cmdtiptip").inner_text()
     check("Zeilenwechsel: neuer Text nach Delay", "disk usage" in tip2)
-    # WATCHDOG: Zeile unter der Maus verschwindet OHNE Mausbewegung (wie beim
-    # Scrollen unter statischem Cursor) -> Tooltip muss in ~200 ms weg sein
-    pg.eval_on_selector(".cmditem", """el => {
-      const items = [...document.querySelectorAll('#cmdlist .cmditem')];
-      const row = items.find(r => r.querySelector('code').textContent === 'df -h');
-      if (row) row.style.display = 'none';
-    }""")
-    pg.wait_for_timeout(500)
-    check("Watchdog: Tooltip weg ohne Mausbewegung (Zeile unterm Cursor weg)",
-          pg.eval_on_selector("#cmdtiptip", "el => el.classList.contains('hidden')"))
-    pg.eval_on_selector("#cmdlist", "el => { el.querySelectorAll('.cmditem').forEach(r => r.style.display = ''); }")
     # Scrollen versteckt sofort
     pg.eval_on_selector("#cmdlist", "el => { el.scrollTop = el.scrollHeight; }")
     pg.wait_for_timeout(150)
