@@ -1574,19 +1574,30 @@ const TERM_DEFAULT_H = 340; // Standard-/Reset-Höhe eines Terminal-Frames
 const CMD_GROUPS = [
   { title: "Filesystems & mounts", items: [
     { c: "mount -a", d: "Mount all filesystems from /etc/fstab — run it after editing fstab or when a boot skipped mounts." },
+    { c: "mount -o remount,rw /", d: "Remount the root filesystem read-write — the classic fix when a disk error switched it to read-only." },
+    { c: "findmnt", d: "Show the mount tree: which device is mounted where and with which options." },
+    { c: "fstrim -av", d: "Trim all mounted SSDs (discard unused blocks). Keeps flash storage fast; safe on modern systems." },
     { c: "df -h", d: "Show disk usage of all mounted filesystems, human-readable sizes." },
     { c: "lsblk", d: "List block devices: drives, partitions and their mount points." },
     { c: "du -sh *", d: "Show the total size of every file/folder in the current directory." },
   ]},
   { title: "Packages (APT — Debian/Ubuntu)", items: [
+    { c: "apt-get update && apt-get upgrade -y", d: "The daily routine in one copy: refresh the package index and install all upgrades right away." },
     { c: "apt-get update", d: "Refresh the package index from the configured repositories." },
+    { c: "apt list --upgradable", d: "List the packages that have an available upgrade — look before you upgrade." },
     { c: "apt-get upgrade -y", d: "Install all available upgrades of installed packages (-y: no prompt). Keeps installed/removed set unchanged." },
     { c: "apt-get dist-upgrade -y", d: "Like upgrade, but may also install/remove packages when dependencies demand it." },
+    { c: "apt-get install <package>", d: "Install a package. Replace <package> with the real name (e.g. apt-get install tmux)." },
+    { c: "apt-get purge <package>", d: "Remove a package INCLUDING its config files. Replace <package> with the package name." },
     { c: "apt-get autoremove --purge -y", d: "Remove packages that are no longer needed, incl. their config files." },
     { c: "apt-get clean", d: "Delete cached .deb files from /var/cache/apt to free disk space." },
-    { c: "apt-get install <package>", d: "Install a package. Replace <package> with the real name (e.g. apt-get install tmux)." },
   ]},
-  { title: "Docker cleanup", items: [
+  { title: "Docker", items: [
+    { c: "docker ps -a", d: "List ALL containers incl. stopped ones — see what exists before you prune." },
+    { c: "docker stats --no-stream", d: "Live CPU/RAM/network usage of running containers (one snapshot, no scrolling)." },
+    { c: "docker images", d: "List local images with their sizes and tags." },
+    { c: "docker logs -f <container>", d: "Follow the log output of a container live. Replace <container> with its name (docker ps -a shows it)." },
+    { c: "docker restart <container>", d: "Restart a container, e.g. after a config change. Replace <container> with its name." },
     { c: "docker system df", d: "Disk-usage overview: how much images, containers, volumes and build cache occupy. No flags — run it first to see where space went." },
     { c: "docker container prune -f", d: "Remove ALL stopped containers. Flag -f/--force: skip the confirmation prompt (otherwise docker asks before deleting)." },
     { c: "docker image prune -a -f", d: "Remove images no container uses. Flags: -f skip the prompt; -a/--all remove ALL unused images. WITHOUT -a only untagged 'dangling' images are removed — the gentle choice is 'docker image prune -f', the thorough one is with -a." },
@@ -1597,34 +1608,67 @@ const CMD_GROUPS = [
     { c: "docker system prune -a -f", d: "Everything prune -f does, PLUS all images no container uses. Flags: -a/--all is what removes the old tagged images, -f skips the prompt. Run 'docker system df' first to compare." },
     { c: "docker system prune -a -f --volumes", d: "Maximum cleanup: like -a -f, and --volumes additionally removes unused volumes. ⚠️ Volumes can hold data — only run when you are sure nothing needs them." },
   ]},
-  { title: "System, logs & network", items: [
-    { c: "journalctl -xe", d: "Show recent systemd logs; -x explains the entries, -e jumps to the newest messages." },
+  { title: "System, services & processes", items: [
     { c: "systemctl status", d: "Overview of the systemd state and the most important services." },
+    { c: "systemctl restart <service>", d: "Restart a systemd service (e.g. nginx, ssh, docker). Replace <service> with its name." },
+    { c: "systemctl enable --now <service>", d: "Start a service now AND make it auto-start on boot. Replace <service> with its name." },
+    { c: "journalctl -xe", d: "Show recent systemd logs; -x explains the entries, -e jumps to the newest messages." },
+    { c: "journalctl -u <service> -f", d: "Follow the log of ONE service live — the fastest way to see why it fails. Replace <service>." },
+    { c: "dmesg | tail -20", d: "Show the newest kernel messages: hardware errors, disk problems, USB events." },
+    { c: "ps aux --sort=-%cpu | head -15", d: "The 15 processes using the most CPU right now." },
     { c: "free -h", d: "Show RAM + swap usage, human-readable." },
     { c: "htop", d: "Interactive process viewer with CPU/RAM bars (install first: apt-get install htop)." },
-    { c: "ip a", d: "Show all network interfaces and their IP addresses." },
-    { c: "ss -tulpn", d: "List listening/established TCP+UDP sockets with the owning process (-p needs root)." },
     { c: "uptime", d: "How long the system has been running plus the current load average." },
+  ]},
+  { title: "Network", items: [
+    { c: "ip a", d: "Show all network interfaces and their IP addresses." },
+    { c: "ip route show", d: "Show the routing table — which gateway leads where (the default route is the uplink)." },
+    { c: "ss -tulpn", d: "List listening/established TCP+UDP sockets with the owning process (-p needs root)." },
+    { c: "ping -c 4 <host>", d: "Check connectivity to a host: 4 pings with timing. Replace <host> with an IP or name." },
+    { c: "curl -I <url>", d: "Fetch only the HTTP headers of a URL — quick check whether a web service answers (HTTP 200 = ok)." },
   ]},
 ];
 
 let cmdOpen = true;   // Befehlsliste sichtbar?
 try { cmdOpen = localStorage.getItem("netspy.cmdPanel") !== "0"; } catch (e) { /* still */ }
 
+let cmdFavs = [];     // favorisierte Befehle (in Klick-Reihenfolge)
+try { cmdFavs = JSON.parse(localStorage.getItem("netspy.cmdFavs") || "[]"); } catch (e) { cmdFavs = []; }
+// Befehl -> Beschreibung, fuer die Favoriten-Gruppe (ohne doppelte Daten)
+const CMD_INDEX = {};
+CMD_GROUPS.forEach(g => g.items.forEach(it => { CMD_INDEX[it.c] = it; }));
+
+function toggleFav(c) {
+  const i = cmdFavs.indexOf(c);
+  if (i >= 0) cmdFavs.splice(i, 1);
+  else cmdFavs.push(c);
+  try { localStorage.setItem("netspy.cmdFavs", JSON.stringify(cmdFavs)); } catch (e) { /* still */ }
+  renderCmdList();
+}
+
 function renderCmdList() {
   const box = document.getElementById("cmdlist");
   if (!box) return;
-  box.innerHTML = CMD_GROUPS.map(g =>
-    `<div class="cmdgroup"><div class="cmdgtitle">${esc(g.title)}</div>` +
-    g.items.map(it =>
-      `<div class="cmditem" data-desc="${esc(it.d)}">` +
-      `<code>${esc(it.c)}</code>` +
-      `<button class="cmdcopy" title="copy to clipboard">⧉</button></div>`).join("") +
-    `</div>`).join("");
-  // Copy: Klick auf den ⧉-Button (und auf den Code selbst) -> Clipboard
+  const rowHtml = (it, fav) =>
+    `<div class="cmditem" data-desc="${esc(it.d)}">` +
+    `<button class="cmdfav ${fav ? "on" : ""}" title="${fav ? "remove from favorites" : "add to favorites"}">${fav ? "★" : "☆"}</button>` +
+    `<code>${esc(it.c)}</code>` +
+    `<button class="cmdcopy" title="copy to clipboard">⧉</button></div>`;
+  const groups = [];
+  if (cmdFavs.length) {
+    const favItems = cmdFavs.filter(c => CMD_INDEX[c]).map(c => CMD_INDEX[c]);
+    groups.push(`<div class="cmdgroup"><div class="cmdgtitle">⭐ Favorites</div>` +
+      favItems.map(it => rowHtml(it, true)).join("") + `</div>`);
+  }
+  CMD_GROUPS.forEach(g => {
+    groups.push(`<div class="cmdgroup"><div class="cmdgtitle">${esc(g.title)}</div>` +
+      g.items.map(it => rowHtml(it, cmdFavs.includes(it.c))).join("") + `</div>`);
+  });
+  box.innerHTML = groups.join("");
+  // Copy + Favoriten + Tooltip je Zeile binden
   box.querySelectorAll(".cmditem").forEach(row => {
+    const code = row.querySelector("code").textContent;
     const copyBtn = () => {
-      const code = row.querySelector("code").textContent;
       copyText(code).then(ok => {
         const btn = row.querySelector(".cmdcopy");
         if (!btn) return;
@@ -1636,6 +1680,7 @@ function renderCmdList() {
     };
     row.querySelector(".cmdcopy").addEventListener("click", copyBtn);
     row.querySelector("code").addEventListener("click", copyBtn);
+    row.querySelector(".cmdfav").addEventListener("click", () => toggleFav(code));
   });
   // Hover-Beschreibung: fixed-Tooltip (nicht vom scrollenden Panel abgeschnitten)
   const tip = document.getElementById("cmdtiptip");

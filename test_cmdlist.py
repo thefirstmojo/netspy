@@ -51,6 +51,8 @@ with sync_playwright() as pw:
     pg.on("pageerror", lambda e: errs.append(str(e)))
     pg.add_init_script("""
       try { sessionStorage.setItem('netspy.termLogin','1'); } catch (e) {}
+      try { localStorage.removeItem('netspy.cmdFavs'); } catch (e) {}
+      try { localStorage.removeItem('netspy.cmdPanel'); } catch (e) {}
       // Clipboard mocken (navigator.clipboard ist read-only -> defineProperty)
       try {
         window.__copied = null;
@@ -71,17 +73,43 @@ with sync_playwright() as pw:
     txt = pg.locator("#cmdlist").inner_text().lower()
     for needle in ["mount -a", "apt-get update", "apt-get upgrade -y",
                    "docker system prune -f", "docker system prune -a -f --volumes",
-                   "filesystems & mounts", "docker cleanup", "journalctl -xe"]:
+                   "filesystems & mounts", "journalctl -xe",
+                   "fstrim -av", "mount -o remount,rw /", "docker ps -a",
+                   "systemctl restart <service>", "ping -c 4 <host>", "ip route show",
+                   "system, services & processes", "network"]:
         check(f"enthält: {needle}", needle in txt)
-    check("4 Gruppen", pg.locator("#cmdlist .cmdgtitle").count() == 4)
+    check("5 Gruppen", pg.locator("#cmdlist .cmdgtitle").count() == 5)
     n_items = pg.locator("#cmdlist .cmditem").count()
-    check(f"26 Einträge ({n_items})", n_items == 26)
+    check(f"45 Einträge ({n_items})", n_items == 45)
+    check("keine Favoriten-Gruppe ohne Favs", "favorites" not in txt)
     check("cmdpanel sichtbar (default)",
           pg.eval_on_selector("#cmdpanel", "el => el.style.display !== 'none'"))
-
-    # ---- Tooltip initial versteckt (VOR jeder Mausbewegung) ----
+    # Tooltip initial versteckt — VOR jeder Mausbewegung pruefen
     check("Tooltip initial versteckt",
           pg.eval_on_selector("#cmdtiptip", "el => el.classList.contains('hidden')"))
+
+    # ---- Favoriten: ☆ -> ⭐ Favorites-Gruppe oben ----
+    fav_btn = pg.locator(".cmditem", has=pg.locator("code", has_text="mount -a")).locator(".cmdfav")
+    check("Stern anfangs leer (☆)", fav_btn.inner_text() == "☆")
+    fav_btn.click()
+    pg.wait_for_timeout(250)
+    txt2 = pg.locator("#cmdlist").inner_text().lower()
+    check("Favoriten-Gruppe erscheint", "⭐ favorites" in txt2)
+    favs = pg.evaluate("JSON.parse(localStorage.getItem('netspy.cmdFavs') || '[]')")
+    check(f"localStorage enthält mount -a ({favs})", favs == ["mount -a"])
+    check("mount -a jetzt doppelt (Fav + Gruppe)",
+          pg.locator(".cmditem", has=pg.locator("code", has_text="mount -a")).count() == 2)
+    fav_rows = pg.locator(".cmdgroup", has=pg.locator(".cmdgtitle", has_text="Favorites"))
+    check("Favoriten-Gruppe steht ganz oben",
+          pg.eval_on_selector("#cmdlist .cmdgroup:first-child .cmdgtitle",
+                              "el => el.textContent").lower() == "⭐ favorites".lower())
+    # Entfernen per Stern in der Favoriten-Zeile
+    fav_rows.locator(".cmdfav").first.click()
+    pg.wait_for_timeout(250)
+    check("Stern entfernt Favorit wieder",
+          pg.locator(".cmdgroup", has=pg.locator(".cmdgtitle", has_text="Favorites")).count() == 0)
+    check("mount -a wieder einfach vorhanden",
+          pg.locator(".cmditem", has=pg.locator("code", has_text="mount -a")).count() == 1)
 
     # ---- Copy: Klick auf ⧉ setzt den Befehl ins Clipboard ----
     row = pg.locator(".cmditem", has=pg.locator("code", has_text="mount -a"))

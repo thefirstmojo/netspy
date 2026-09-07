@@ -263,6 +263,9 @@ footer .bmc-mini:hover { opacity: 1; color: var(--rx, #22d3ee); }
   cursor: pointer; line-height: 1.5; }
 .cmditem button:hover { border-color: var(--rx, #22d3ee); color: #e2e8f0; }
 .cmditem button.copied { border-color: #4ade80; color: #4ade80; }
+.cmditem button.cmdfav { border-color: transparent; padding: 2px 4px; font-size: 13px; line-height: 1.1; color: #64748b; }
+.cmditem button.cmdfav:hover { border-color: transparent; color: #fbbf24; }
+.cmditem button.cmdfav.on { color: #fbbf24; border-color: transparent; }
 /* Hover-Beschreibung: kleines Fixed-Tooltip neben der Maus */
 .cmdtiptip { position: fixed; z-index: 9999; pointer-events: none; max-width: 320px;
   background: #0f172a; border: 1px solid rgba(148,163,184,.35); color: #e2e8f0;
