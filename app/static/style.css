@@ -272,6 +272,14 @@ footer .bmc-mini:hover { opacity: 1; color: var(--rx, #22d3ee); }
   border-radius: 8px; padding: 6px 9px; font-size: 11.5px; line-height: 1.45;
   box-shadow: 0 6px 18px rgba(0,0,0,.45); }
 .cmdtiptip.hidden { display: none; }   /* WICHTIG: sonst bleibt der Tooltip immer sichtbar */
+
+/* Sichtbare Scrollbalken: Chromium/Overlay-Scrollbars (jlesage-Container)
+   zeigen den Griff sonst erst beim Hovern - der wirkt dann "deaktiviert". */
+#cmdlist::-webkit-scrollbar, .tablewrap::-webkit-scrollbar { width: 10px; height: 10px; }
+#cmdlist::-webkit-scrollbar-track, .tablewrap::-webkit-scrollbar-track { background: transparent; }
+#cmdlist::-webkit-scrollbar-thumb, .tablewrap::-webkit-scrollbar-thumb { background: rgba(148,163,184,.35); border-radius: 5px; }
+#cmdlist::-webkit-scrollbar-thumb:hover, .tablewrap::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,.55); }
+#cmdlist, .tablewrap { scrollbar-width: thin; scrollbar-color: rgba(148,163,184,.4) transparent; }
 @media (max-width: 900px) {
   .cmdpanel { width: 260px; }
 }
