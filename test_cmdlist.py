@@ -125,6 +125,10 @@ with sync_playwright() as pw:
     pg.wait_for_timeout(150)
     check("Tooltip verschwindet nach Wegfahren",
           pg.eval_on_selector("#cmdtiptip", "el => el.classList.contains('hidden')"))
+    # ECHTE Sichtbarkeit pruefen (CSS display:none), nicht nur die Klasse -
+    # das hier haette den .hidden-CSS-Bug sofort verraten
+    disp = pg.eval_on_selector("#cmdtiptip", "el => getComputedStyle(el).display")
+    check(f"WIRKLICH per CSS ausgeblendet (display={disp})", disp == "none")
 
     # ---- Tooltip beim Hover mit 1-s-Delay ----
     row.hover()

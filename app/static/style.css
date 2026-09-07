@@ -271,6 +271,7 @@ footer .bmc-mini:hover { opacity: 1; color: var(--rx, #22d3ee); }
   background: #0f172a; border: 1px solid rgba(148,163,184,.35); color: #e2e8f0;
   border-radius: 8px; padding: 6px 9px; font-size: 11.5px; line-height: 1.45;
   box-shadow: 0 6px 18px rgba(0,0,0,.45); }
+.cmdtiptip.hidden { display: none; }   /* WICHTIG: sonst bleibt der Tooltip immer sichtbar */
 @media (max-width: 900px) {
   .cmdpanel { width: 260px; }
 }
