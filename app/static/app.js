@@ -1703,42 +1703,91 @@ function renderCmdList() {
   });
 }
 
+/* Hover-Beschreibung mit 1-s-Delay: erst wenn die Maus eine Zeile lang
+   ruht, poppt der Tooltip auf. Verlassen der Zeile/Liste, Scrollen (Liste
+   oder Seite), Fenster-Blur/Tab-Wechsel verstecken ihn SOFORT und brechen
+   den Timer — beim schnellen Durchscrollen poppt nichts auf, und ein
+   verlorenes mouseleave kann den Tooltip nicht mehr einfrieren: ein
+   document-weiter mousemove-Tracker (elementFromPoint) versteckt ihn bei
+   JEDER Bewegung ausserhalb einer Zeile. */
+let tipTimer = null;
+let tipRowEl = null;
+const TIP_DELAY = 1000;
+
 function hideCmdTip() {
   const tip = document.getElementById("cmdtiptip");
   if (tip) tip.classList.add("hidden");
 }
 
-function bindCmdTip() {
-  const box = document.getElementById("cmdlist");
-  const tip = document.getElementById("cmdtiptip");
-  if (!box || !tip) return;
-  // Delegation statt pro-Zeile-Listener: JEDER Mauszustand wird explizit
-  // gesetzt (mouseover auf Zeile -> zeigen, sonst -> verstecken). Damit kann
-  // der Tooltip nicht "haengen bleiben", wenn ein mouseleave verloren geht
-  // (z. B. Element-Wechsel/Scroll) — der naechste Mauszustand korrigiert.
-  box.addEventListener("mouseover", e => {
-    const row = e.target && e.target.closest ? e.target.closest(".cmditem") : null;
-    if (!row) { hideCmdTip(); return; }
-    tip.textContent = row.dataset.desc || "";
-    tip.classList.remove("hidden");
-    moveTip(e);
-  });
-  box.addEventListener("mousemove", moveTip);
-  box.addEventListener("mouseleave", hideCmdTip);
-  // Maus verlaesst das Fenster -> Tooltip zu
-  document.addEventListener("mouseleave", hideCmdTip);
+function cancelTip() {
+  if (tipTimer) { clearTimeout(tipTimer); tipTimer = null; }
+  tipRowEl = null;
 }
 
-function moveTip(e) {
+function positionTip(x, y) {
   const tip = document.getElementById("cmdtiptip");
   if (!tip) return;
   const pad = 14;
-  let x = e.clientX + pad, y = e.clientY + pad;
+  let px = x + pad, py = y + pad;
   const r = tip.getBoundingClientRect();
-  if (x + r.width > window.innerWidth - 8) x = e.clientX - r.width - pad;
-  if (y + r.height > window.innerHeight - 8) y = e.clientY - r.height - pad;
-  tip.style.left = x + "px";
-  tip.style.top = y + "px";
+  if (px + r.width > window.innerWidth - 8) px = x - r.width - pad;
+  if (py + r.height > window.innerHeight - 8) py = y - r.height - pad;
+  tip.style.left = px + "px";
+  tip.style.top = py + "px";
+}
+
+/* Zeile unter dem Cursor (auch ueber iframes hinweg — elementFromPoint
+   liefert dort das iframe-Element, closest findet keine .cmditem). */
+function tipRowFrom(e) {
+  const el = (document.elementFromPoint && e.clientX != null)
+    ? document.elementFromPoint(e.clientX, e.clientY) : e.target;
+  return el && el.closest ? el.closest(".cmditem") : null;
+}
+
+function armTip(row, x, y) {
+  if (tipRowEl === row && tipTimer) return;   // Timer fuer diese Zeile laeuft schon
+  cancelTip();
+  hideCmdTip();   // Zeilenwechsel: alter Tooltip sofort weg, neuer erst nach Delay
+  tipRowEl = row;
+  tipTimer = setTimeout(() => {
+    tipTimer = null;
+    const tip = document.getElementById("cmdtiptip");
+    if (!tip || !tipRowEl || !tipRowEl.isConnected) return;
+    tip.textContent = tipRowEl.dataset.desc || "";
+    tip.classList.remove("hidden");
+    positionTip(x, y);
+  }, TIP_DELAY);
+}
+
+function bindCmdTip() {
+  const box = document.getElementById("cmdlist");
+  if (!box) return;
+  box.addEventListener("mouseover", e => {
+    const row = e.target && e.target.closest ? e.target.closest(".cmditem") : null;
+    if (row) armTip(row, e.clientX, e.clientY);
+  });
+  // Sichtbarer Tooltip folgt der Maus nur innerhalb der Zeile
+  box.addEventListener("mousemove", e => {
+    if (tipTimer === null) {
+      const tip = document.getElementById("cmdtiptip");
+      if (tip && !tip.classList.contains("hidden") && tipRowEl) positionTip(e.clientX, e.clientY);
+    }
+  });
+  // Jede Mausbewegung im Dokument: ausserhalb einer Zeile -> sofort weg
+  document.addEventListener("mousemove", e => {
+    const row = tipRowFrom(e);
+    if (!row) { cancelTip(); hideCmdTip(); }
+    else if (row !== tipRowEl) armTip(row, e.clientX, e.clientY);
+  }, { passive: true });
+  box.addEventListener("mouseleave", () => { cancelTip(); hideCmdTip(); });
+  // Scrollen verdeckt Inhalte -> Tooltip sofort zu + Timer weg
+  box.addEventListener("scroll", () => { cancelTip(); hideCmdTip(); }, { passive: true });
+  window.addEventListener("scroll", () => { cancelTip(); hideCmdTip(); }, { passive: true });
+  window.addEventListener("blur", () => { cancelTip(); hideCmdTip(); });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) { cancelTip(); hideCmdTip(); }
+  });
+  document.addEventListener("mouseleave", () => { cancelTip(); hideCmdTip(); });
 }
 
 async function copyText(t) {

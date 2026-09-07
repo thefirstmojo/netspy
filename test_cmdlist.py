@@ -125,41 +125,65 @@ with sync_playwright() as pw:
     check("Tooltip verschwindet nach Wegfahren",
           pg.eval_on_selector("#cmdtiptip", "el => el.classList.contains('hidden')"))
 
-    # ---- Tooltip beim Hover ----
+    # ---- Tooltip beim Hover mit 1-s-Delay ----
     row.hover()
-    pg.wait_for_timeout(250)
+    pg.wait_for_timeout(300)
+    check("Tooltip poppt NICHT sofort auf (Delay)",
+          pg.eval_on_selector("#cmdtiptip", "el => el.classList.contains('hidden')"))
+    pg.wait_for_timeout(1000)
     tip_txt = pg.locator("#cmdtiptip").inner_text()
-    check("Tooltip zeigt Beschreibung", "fstab" in tip_txt)
-    # In die Gruppen-Titel-Leiste fahren (ausserhalb der Zeilen) -> Tooltip weg
+    check("Tooltip zeigt Beschreibung nach Delay", "fstab" in tip_txt)
+    # In die Gruppen-Titel-Leiste fahren (ausserhalb der Zeilen) -> sofort weg
     box = pg.locator("#cmdlist")
     bb = box.bounding_box()
     pg.mouse.move(bb["x"] + 5, bb["y"] + 2)
     pg.wait_for_timeout(150)
     check("Tooltip weg ausserhalb der Zeilen",
           pg.eval_on_selector("#cmdtiptip", "el => el.classList.contains('hidden')"))
-    row2 = pg.locator(".cmditem", has=pg.locator("code", has_text="uptime"))
+    # Zeilenwechsel: alte Zeile verlassen = weg; neue Zeile erst nach Delay
+    # (df -h liegt direkt unter mount -a -> sichtbar, kein Scroll noetig)
+    row2 = pg.locator(".cmditem", has=pg.locator("code", has_text="df -h"))
     row2.hover()
-    pg.wait_for_timeout(200)
+    pg.wait_for_timeout(250)
+    check("Zeilenwechsel: erst weg (Delay laeuft)",
+          pg.eval_on_selector("#cmdtiptip", "el => el.classList.contains('hidden')"))
+    pg.wait_for_timeout(1000)
     tip2 = pg.locator("#cmdtiptip").inner_text()
-    check("Zeilenwechsel aktualisiert Text", "load" in tip2)
+    check("Zeilenwechsel: neuer Text nach Delay", "disk usage" in tip2)
+    # Scrollen versteckt sofort
+    pg.eval_on_selector("#cmdlist", "el => { el.scrollTop = el.scrollHeight; }")
+    pg.wait_for_timeout(150)
+    check("Scrollen versteckt den Tooltip",
+          pg.eval_on_selector("#cmdtiptip", "el => el.classList.contains('hidden')"))
     pg.mouse.move(5, 5)
     pg.wait_for_timeout(150)
     check("Tooltip nach Zeilenwechsel + Wegfahren zu",
           pg.eval_on_selector("#cmdtiptip", "el => el.classList.contains('hidden')"))
 
     # ---- Flags in den Docker-Beschreibungen erklaert ----
+    # Tiefe Zeilen: erst in den sichtbaren Bereich scrollen, DANN hover
+    # (Scrollen beim Hover wuerde den Timer abbrechen -> Tooltip bliebe aus)
     drow = pg.locator(".cmditem", has=pg.locator("code", has_text="docker image prune -a -f"))
+    drow.scroll_into_view_if_needed()
+    pg.wait_for_timeout(200)
     drow.hover()
-    pg.wait_for_timeout(250)
+    pg.wait_for_timeout(1300)
     dtip = pg.locator("#cmdtiptip").inner_text()
     check("Flags erklaert (-a/--all)", "dangling" in dtip and "-a" in dtip)
     check("Flag -f erklaert", "-f" in dtip)
     pg.mouse.move(5, 5)
+    pg.wait_for_timeout(150)
     srow = pg.locator(".cmditem", has=pg.locator("code", has_text="docker system prune -f"))
+    srow.scroll_into_view_if_needed()
+    pg.wait_for_timeout(200)
     srow.hover()
-    pg.wait_for_timeout(250)
+    pg.wait_for_timeout(1300)
     stip = pg.locator("#cmdtiptip").inner_text()
     check("system prune -f: warum kein -a (tagged bleiben)", "tagged" in stip)
+    pg.mouse.move(5, 5)
+    pg.wait_for_timeout(150)
+    check("Tooltip nach Docker-Hover weg",
+          pg.eval_on_selector("#cmdtiptip", "el => el.classList.contains('hidden')"))
 
     # ---- Toggle: 📋 klappt die Liste ein/aus ----
     pg.click("#cmdopen")
