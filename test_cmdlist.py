@@ -121,13 +121,31 @@ with sync_playwright() as pw:
     copied = pg.evaluate("window.__copied")
     check(f"Copy liefert exakten Text ({copied!r})", copied == "mount -a")
     pg.mouse.move(5, 5)   # Maus von der Zeile weg -> Tooltip zu
+    pg.wait_for_timeout(150)
+    check("Tooltip verschwindet nach Wegfahren",
+          pg.eval_on_selector("#cmdtiptip", "el => el.classList.contains('hidden')"))
 
     # ---- Tooltip beim Hover ----
     row.hover()
     pg.wait_for_timeout(250)
     tip_txt = pg.locator("#cmdtiptip").inner_text()
     check("Tooltip zeigt Beschreibung", "fstab" in tip_txt)
+    # In die Gruppen-Titel-Leiste fahren (ausserhalb der Zeilen) -> Tooltip weg
+    box = pg.locator("#cmdlist")
+    bb = box.bounding_box()
+    pg.mouse.move(bb["x"] + 5, bb["y"] + 2)
+    pg.wait_for_timeout(150)
+    check("Tooltip weg ausserhalb der Zeilen",
+          pg.eval_on_selector("#cmdtiptip", "el => el.classList.contains('hidden')"))
+    row2 = pg.locator(".cmditem", has=pg.locator("code", has_text="uptime"))
+    row2.hover()
+    pg.wait_for_timeout(200)
+    tip2 = pg.locator("#cmdtiptip").inner_text()
+    check("Zeilenwechsel aktualisiert Text", "load" in tip2)
     pg.mouse.move(5, 5)
+    pg.wait_for_timeout(150)
+    check("Tooltip nach Zeilenwechsel + Wegfahren zu",
+          pg.eval_on_selector("#cmdtiptip", "el => el.classList.contains('hidden')"))
 
     # ---- Flags in den Docker-Beschreibungen erklaert ----
     drow = pg.locator(".cmditem", has=pg.locator("code", has_text="docker image prune -a -f"))

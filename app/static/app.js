@@ -1701,18 +1701,32 @@ function renderCmdList() {
     row.querySelector("code").addEventListener("click", copyBtn);
     row.querySelector(".cmdfav").addEventListener("click", () => toggleFav(code));
   });
-  // Hover-Beschreibung: fixed-Tooltip (nicht vom scrollenden Panel abgeschnitten)
+}
+
+function hideCmdTip() {
   const tip = document.getElementById("cmdtiptip");
-  if (!tip) return;
-  box.querySelectorAll(".cmditem").forEach(row => {
-    row.addEventListener("mouseenter", e => {
-      tip.textContent = row.dataset.desc || "";
-      tip.classList.remove("hidden");
-      moveTip(e);
-    });
-    row.addEventListener("mousemove", moveTip);
-    row.addEventListener("mouseleave", () => tip.classList.add("hidden"));
+  if (tip) tip.classList.add("hidden");
+}
+
+function bindCmdTip() {
+  const box = document.getElementById("cmdlist");
+  const tip = document.getElementById("cmdtiptip");
+  if (!box || !tip) return;
+  // Delegation statt pro-Zeile-Listener: JEDER Mauszustand wird explizit
+  // gesetzt (mouseover auf Zeile -> zeigen, sonst -> verstecken). Damit kann
+  // der Tooltip nicht "haengen bleiben", wenn ein mouseleave verloren geht
+  // (z. B. Element-Wechsel/Scroll) — der naechste Mauszustand korrigiert.
+  box.addEventListener("mouseover", e => {
+    const row = e.target && e.target.closest ? e.target.closest(".cmditem") : null;
+    if (!row) { hideCmdTip(); return; }
+    tip.textContent = row.dataset.desc || "";
+    tip.classList.remove("hidden");
+    moveTip(e);
   });
+  box.addEventListener("mousemove", moveTip);
+  box.addEventListener("mouseleave", hideCmdTip);
+  // Maus verlaesst das Fenster -> Tooltip zu
+  document.addEventListener("mouseleave", hideCmdTip);
 }
 
 function moveTip(e) {
@@ -1761,6 +1775,7 @@ function applyCmdPanel() {
 
 function initCmdPanel() {
   renderCmdList();
+  bindCmdTip();
   applyCmdPanel();
   const close = document.getElementById("cmdclose");
   if (close) close.addEventListener("click", () => {
