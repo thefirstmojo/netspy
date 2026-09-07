@@ -96,6 +96,21 @@ with sync_playwright() as pw:
     pg.wait_for_timeout(250)
     tip_txt = pg.locator("#cmdtiptip").inner_text()
     check("Tooltip zeigt Beschreibung", "fstab" in tip_txt)
+    pg.mouse.move(5, 5)
+
+    # ---- Flags in den Docker-Beschreibungen erklaert ----
+    drow = pg.locator(".cmditem", has=pg.locator("code", has_text="docker image prune -a -f"))
+    drow.hover()
+    pg.wait_for_timeout(250)
+    dtip = pg.locator("#cmdtiptip").inner_text()
+    check("Flags erklaert (-a/--all)", "dangling" in dtip and "-a" in dtip)
+    check("Flag -f erklaert", "-f" in dtip)
+    pg.mouse.move(5, 5)
+    srow = pg.locator(".cmditem", has=pg.locator("code", has_text="docker system prune -f"))
+    srow.hover()
+    pg.wait_for_timeout(250)
+    stip = pg.locator("#cmdtiptip").inner_text()
+    check("system prune -f: warum kein -a (tagged bleiben)", "tagged" in stip)
 
     # ---- Toggle: 📋 klappt die Liste ein/aus ----
     pg.click("#cmdopen")
