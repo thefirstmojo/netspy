@@ -1716,7 +1716,9 @@ function renderCmdList() {
 let tipTimer = null;
 let tipRowEl = null;
 let tipX = -1, tipY = -1;   // letzte bekannte Mausposition (Watchdog)
+let tipLastMove = 0;        // Zeitstempel der letzten Mausbewegung
 const TIP_DELAY = 1000;
+const TIP_STALE = 5000;     // ohne Mausbewegung blendet sich der Tooltip selbst aus
 
 function hideCmdTip() {
   const tip = document.getElementById("cmdtiptip");
@@ -1780,6 +1782,7 @@ function bindCmdTip() {
   // Jede Mausbewegung im Dokument: ausserhalb einer Zeile -> sofort weg
   document.addEventListener("mousemove", e => {
     tipX = e.clientX; tipY = e.clientY;
+    tipLastMove = Date.now();
     const row = tipRowFrom(e);
     if (!row) { cancelTip(); hideCmdTip(); }
     else if (row !== tipRowEl) armTip(row, e.clientX, e.clientY);
@@ -1803,7 +1806,13 @@ function bindCmdTip() {
      letzten bekannten Mausposition). Damit werden AUCH Faelle ohne
      Mausbewegung erkannt: Scrollen unter statischem Cursor (die Zeile
      wandert unter der Maus weg) oder verlorene Events — der Tooltip
-     verschwindet dann spätestens nach ~200 ms. */
+     verschwindet dann spätestens nach ~200 ms.
+     ZUSAETZLICH Lebensdauer: Wenn die Maus das FENSTER verlaesst (noVNC/
+     VNC: die Seite bekommt danach gar keine Events mehr, die letzte
+     Position bleibt auf der Zeile stehen), blendet sich der Tooltip nach
+     TIP_STALE ms ohne jede Mausbewegung von selbst aus — er kann damit
+     prinzipiell nicht mehr dauerhaft kleben. Minimale Mausbewegung auf der
+     Zeile (z. B. beim Lesen) haelt ihn frisch. */
   setInterval(() => {
     const tip = document.getElementById("cmdtiptip");
     const active = tip && (!tip.classList.contains("hidden") || tipTimer);
@@ -1811,6 +1820,9 @@ function bindCmdTip() {
     const el = document.elementFromPoint(tipX, tipY);
     const row = el && el.closest ? el.closest(".cmditem") : null;
     if (!row || row !== tipRowEl) { cancelTip(); hideCmdTip(); }
+    else if (!tip.classList.contains("hidden") && Date.now() - tipLastMove > TIP_STALE) {
+      cancelTip(); hideCmdTip();
+    }
   }, 200);
 }
 

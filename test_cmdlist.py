@@ -171,6 +171,23 @@ with sync_playwright() as pw:
     pg.wait_for_timeout(150)
     check("Tooltip nach Zeilenwechsel + Wegfahren zu",
           pg.eval_on_selector("#cmdtiptip", "el => el.classList.contains('hidden')"))
+    # LEBENSDAUER: Tooltip blendet sich nach 5 s OHNE Mausbewegung selbst aus
+    # (deckt Fenster-Verlassen ohne Events ab - z. B. noVNC: die letzte
+    # Mausposition bleibt auf der Zeile stehen, kein Signal erreicht die Seite)
+    row.scroll_into_view_if_needed()
+    pg.wait_for_timeout(300)   # Scroll abschliessen BEVOR die Maus faehrt
+    row.hover()
+    pg.wait_for_timeout(1500)
+    check("Stale: nach Hover sichtbar",
+          not pg.eval_on_selector("#cmdtiptip", "el => el.classList.contains('hidden')"))
+    pg.wait_for_timeout(3200)
+    check("Stale: nach 3 s ohne Bewegung noch sichtbar (Lesen moeglich)",
+          not pg.eval_on_selector("#cmdtiptip", "el => el.classList.contains('hidden')"))
+    pg.wait_for_timeout(2600)
+    check("Stale: nach 5,8 s ohne Bewegung selbst ausgeblendet",
+          pg.eval_on_selector("#cmdtiptip", "el => el.classList.contains('hidden')"))
+    pg.mouse.move(5, 5)
+    pg.wait_for_timeout(150)
 
     # ---- Flags in den Docker-Beschreibungen erklaert ----
     # Tiefe Zeilen: erst in den sichtbaren Bereich scrollen, DANN hover
