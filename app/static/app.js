@@ -1715,6 +1715,7 @@ function renderCmdList() {
    JEDER Bewegung ausserhalb einer Zeile. */
 let tipTimer = null;
 let tipRowEl = null;
+let tipX = -1, tipY = -1;   // letzte bekannte Mausposition (Watchdog)
 const TIP_DELAY = 1000;
 
 function hideCmdTip() {
@@ -1778,6 +1779,7 @@ function bindCmdTip() {
   });
   // Jede Mausbewegung im Dokument: ausserhalb einer Zeile -> sofort weg
   document.addEventListener("mousemove", e => {
+    tipX = e.clientX; tipY = e.clientY;
     const row = tipRowFrom(e);
     if (!row) { cancelTip(); hideCmdTip(); }
     else if (row !== tipRowEl) armTip(row, e.clientX, e.clientY);
@@ -1790,7 +1792,26 @@ function bindCmdTip() {
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) { cancelTip(); hideCmdTip(); }
   });
-  document.addEventListener("mouseleave", () => { cancelTip(); hideCmdTip(); });
+  // Maus verlaesst das FENSTER: das letzte mouseout hat relatedTarget=null.
+  // (zuverlaessiger als mouseleave auf document; auch bei schnellen Uebergaengen)
+  document.addEventListener("mouseout", e => {
+    if (!e.relatedTarget) { cancelTip(); hideCmdTip(); }
+  });
+  /* WATCHDOG (Strategie: nicht auf Maus-Events verlassen): solange der
+     Tooltip sichtbar ist oder ein Timer laeuft, prueft ein 200-ms-Intervall,
+     ob die Maus noch ueber der Ziel-Zeile liegt (elementFromPoint an der
+     letzten bekannten Mausposition). Damit werden AUCH Faelle ohne
+     Mausbewegung erkannt: Scrollen unter statischem Cursor (die Zeile
+     wandert unter der Maus weg) oder verlorene Events — der Tooltip
+     verschwindet dann spätestens nach ~200 ms. */
+  setInterval(() => {
+    const tip = document.getElementById("cmdtiptip");
+    const active = tip && (!tip.classList.contains("hidden") || tipTimer);
+    if (!active || tipX < 0) return;
+    const el = document.elementFromPoint(tipX, tipY);
+    const row = el && el.closest ? el.closest(".cmditem") : null;
+    if (!row || row !== tipRowEl) { cancelTip(); hideCmdTip(); }
+  }, 200);
 }
 
 async function copyText(t) {
