@@ -1212,7 +1212,12 @@ class TerminalManager:
         # Verbindung ueberlebt Tab-Wechsel und Browser-Reloads. Ohne tmux:
         # normale Login-Shell. Passwort-Auth bleibt interaktiv (ssh -t).
         safe = self._safe_name(t["name"])
-        remote = ("command -v tmux >/dev/null 2>&1 && "
+        # tmux mit aktivierter Maus: sonst haelt tmux die komplette Ausgabe in
+        # seinem eigenen Scrollback und das Mausrad scrolled nichts (xterm sieht
+        # nur die Viewport-Hoehe). "set -g mouse on" laesst das Rad den
+        # tmux-Scrollback scrollen. -g setzt die Option global + bestehende
+        # Sessions, daher greift es auch beim Wiederverbinden (-A).
+        remote = ("command -v tmux >/dev/null 2>&1 && tmux set -g mouse on 2>/dev/null; "
                   f"tmux new -A -s ns-{safe} || exec bash -l")
         cmd = ["ttyd", "-p", str(t["port"]),
                # -W (--writable): OHNE dieses Flag startet ttyd read-only und
