@@ -275,11 +275,11 @@ footer .bmc-mini:hover { opacity: 1; color: var(--rx, #22d3ee); }
 
 /* Sichtbare Scrollbalken: Chromium/Overlay-Scrollbars (jlesage-Container)
    zeigen den Griff sonst erst beim Hovern - der wirkt dann "deaktiviert". */
-#cmdlist::-webkit-scrollbar, .tablewrap::-webkit-scrollbar { width: 10px; height: 10px; }
-#cmdlist::-webkit-scrollbar-track, .tablewrap::-webkit-scrollbar-track { background: transparent; }
-#cmdlist::-webkit-scrollbar-thumb, .tablewrap::-webkit-scrollbar-thumb { background: rgba(148,163,184,.35); border-radius: 5px; }
-#cmdlist::-webkit-scrollbar-thumb:hover, .tablewrap::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,.55); }
-#cmdlist, .tablewrap { scrollbar-width: thin; scrollbar-color: rgba(148,163,184,.4) transparent; }
+body::-webkit-scrollbar, #cmdlist::-webkit-scrollbar, .tablewrap::-webkit-scrollbar { width: 10px; height: 10px; }
+body::-webkit-scrollbar-track, #cmdlist::-webkit-scrollbar-track, .tablewrap::-webkit-scrollbar-track { background: transparent; }
+body::-webkit-scrollbar-thumb, #cmdlist::-webkit-scrollbar-thumb, .tablewrap::-webkit-scrollbar-thumb { background: rgba(148,163,184,.35); border-radius: 5px; }
+body::-webkit-scrollbar-thumb:hover, #cmdlist::-webkit-scrollbar-thumb:hover, .tablewrap::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,.55); }
+body, #cmdlist, .tablewrap { scrollbar-width: thin; scrollbar-color: rgba(148,163,184,.4) transparent; }
 @media (max-width: 900px) {
   .cmdpanel { width: 260px; }
 }
