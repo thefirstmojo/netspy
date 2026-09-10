@@ -6,10 +6,12 @@ FROM python:3.13-slim
 
 # ss (iproute2) wird für die Per-Prozess-Messung (inet_diag) benötigt.
 # openssh-client: ssh für das ttyd-Web-Terminal (Zugriff auf die Hosts).
+# tzdata: ohne Zoneinfo im Image ist die TZ-Variable wirkungslos (der Container
+#         würde still auf UTC bleiben) — Tages-/Monatsgrenze der Storage-Historie.
 # Kein zfsutils nötig: Füllstände liest der Agent über /proc/1/root
 # (pid: host + SYS_PTRACE, im Compose schon aktiv) — siehe _storage_snapshot.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends iproute2 openssh-client curl \
+    && apt-get install -y --no-install-recommends iproute2 openssh-client curl tzdata \
     && curl -fsSL https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -o /usr/local/bin/ttyd \
     && chmod +x /usr/local/bin/ttyd \
     && rm -rf /var/lib/apt/lists/*

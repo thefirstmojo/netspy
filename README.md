@@ -74,6 +74,7 @@ All values live directly in `docker-compose.yml` — no `.env` file.
 | `ROLE` | `web` | `web` (UI + sampler) or `agent` (sampler only) |
 | `SERVERS` | `Main=local` (optional) | `Name=local;Name=http://host:8091` — semicolon-separated. **Optional:** if unset or empty, a local server (`Main=local`) is added automatically on first start |
 | `UPLINK` | auto (default route) | Comma-separated override, e.g. `br0,bond0` |
+| `TZ` | `UTC` | Container timezone, e.g. `Europe/Berlin` (v0.7.35+, `tzdata` ships in the image). Decides when the storage history closes its day and month (local midnight instead of 02:00 with UTC) and the zone of all timestamps. Without `tzdata` the variable would be silently ignored — hence it is part of the image |
 | `WEB_PORT` / `AGENT_PORT` | `8090` / `8091` | Host ports (host networking — the values ARE the external ports) |
 | `AGENT_TOKEN` | empty | Shared `X-Agent-Token` header — **must match on all hosts** |
 | `TTYD_USER` | empty | **Terminal tab login — username** (v0.7.12+). Container env var only — never stored in NetSpy, no settings-page option. Set both `TTYD_USER` + `TTYD_PASS` → the Terminal tab shows a login form and unlocks with these credentials |

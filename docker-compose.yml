@@ -66,6 +66,13 @@ services:
       # (multiple WAN links, policy routing).
       UPLINK: ""
 
+      # Timezone inside the container (TZ, e.g. Europe/Berlin, America/New_York).
+      # It decides when the storage history closes its day and month
+      # (fixed at local midnight instead of 02:00 with UTC) and which zone
+      # all timestamps use. tzdata ships in the image (v0.7.35+).
+      # Empty = UTC.
+      TZ: "Europe/Berlin"
+
       # Ports. NOTE: network_mode: host -> there is NO separate container
       # port mapping (8090:8090 would be ignored). The value below IS the
       # host port:
