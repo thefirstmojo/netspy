@@ -1,4 +1,4 @@
-# NetMon — Netzwerk-Überwachung (Unraid + TrueNAS)
+# NetSpy — Netzwerk-Überwachung (Unraid + TrueNAS)
 # Ein Image, zwei Rollen (ROLE=web | ROLE=agent). Keine Python-Abhängigkeiten (nur stdlib).
 
 # slim (trixie) ist wieder ok: kein zfsutils mehr nötig (siehe RUN-Kommentar)

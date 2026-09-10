@@ -21,7 +21,7 @@
 
 services:
   netspy:
-    # Pin a version for deterministic updates, e.g. ghcr.io/thefirstmojo/netspy:v0.3.11
+    # Pin a version for deterministic updates, e.g. ghcr.io/thefirstmojo/netspy:v0.7.34
     # (a new tag always forces a fresh pull; with :latest you must force re-pull)
     image: ghcr.io/thefirstmojo/netspy:latest
     container_name: netspy

@@ -356,7 +356,12 @@ class Monitor:
                 time.sleep(1.0)
 
     def _fetch(self, url: str) -> dict:
-        req = urllib.request.Request(url.rstrip("/") + "/api/metrics")
+        # Nur http/https: ein Eintrag in servers.yaml soll den Server nicht
+        # dazu bringen, file:// (oder andere Schemata) zu oeffnen.
+        u = str(url or "").strip()
+        if not u.lower().startswith(("http://", "https://")):
+            raise ValueError(f"unsupported server url: {u!r}")
+        req = urllib.request.Request(u.rstrip("/") + "/api/metrics")
         if self.token:
             req.add_header("X-Agent-Token", self.token)
         with urllib.request.urlopen(req, timeout=2.5) as r:
@@ -487,7 +492,14 @@ class Monitor:
                     s["name"]: {
                         "ts": [p[0] for p in list(self.mem_history.get(s["name"], []))],
                         "used": [p[1] for p in list(self.mem_history.get(s["name"], []))],
-                        "total": (list(self.mem_history.get(s["name"], [])) or [None, None, 0])[-1][2],
+                        # Fallback MUSS eine Liste MIT einem 3-Tupel sein:
+                        # [...] or [None, None, 0] -> [-1] waere die Zahl 0 und
+                        # [-1][2] wirft TypeError ('int' object is not
+                        # subscriptable) — das liess das GANZE Dashboard
+                        # 500en, solange ein Server (noch) keinen RAM-Sample
+                        # geliefert hatte (z. B. offline beim Start).
+                        "total": (list(self.mem_history.get(s["name"], []))
+                                  or [(None, None, 0)])[-1][2],
                     }
                     for s in self.servers
                 },
@@ -641,7 +653,6 @@ class StorageStore:
             persist = True
         # m: Monats-Endstand beim Monatswechsel übernehmen.
         # Baseline (erster Tick): last_month setzen, KEIN rückwirkender Wert.
-        import datetime
         lt = time.localtime(now_i)
         month_key = f"{lt.tm_year}-{lt.tm_mon:02d}"
         if entry.get("last_month") is None:

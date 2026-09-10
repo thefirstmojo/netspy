@@ -1035,9 +1035,9 @@ class Sampler:
                             "parent": parent_of[path], "level": level_of[path]})
         except OSError:
             pass
-        if not out:
-            # Fallback: Container-eigene Mounts (ohne pid:host) — df -Pk
-            pass  # bewusst leer: Container-Mounts sind kein sinnvoller Füllstand
+        # Ohne pid:host fehlen die Host-Mounts. Container-eigene Mounts waeren
+        # kein sinnvoller Füllstand — daher hier bewusst kein Fallback (die UI
+        # zeigt stattdessen "no host access").
         self._storage_cache = {"ts": mono, "data": out}
         return out
 
@@ -1117,9 +1117,16 @@ def start_agent(sampler: Sampler, port: int = 8091, token: str = "") -> Threadin
 def _self_test() -> None:
     """Parser-Selbsttest mit Fixture."""
     parsed = parse_ss(_SS_FIXTURE)
-    assert parsed.get(11111) == {"pid": 1234, "rx": 987654, "tx": 120000}, parsed
-    assert parsed.get(22222) == {"pid": 777, "rx": 10000, "tx": 5000}, parsed
-    assert parsed.get(33333) == {"pid": 42, "rx": 0, "tx": 0}, parsed
+    # Erwartung MUSS die vollen Felder enthalten (lport/raddr/estab kamen
+    # spaeter dazu) — sonst schlaegt `agent.py --selftest` fehl.
+    assert parsed.get(11111) == {"pid": 1234, "rx": 987654, "tx": 120000,
+                                 "lport": 445, "raddr": "10.10.10.50",
+                                 "estab": True}, parsed
+    assert parsed.get(22222) == {"pid": 777, "rx": 10000, "tx": 5000,
+                                 "lport": 443, "raddr": "10.10.10.60",
+                                 "estab": True}, parsed
+    assert parsed.get(33333) == {"pid": 42, "rx": 0, "tx": 0,
+                                 "lport": 8091, "raddr": "", "estab": False}, parsed
 
     # Default-Route-Erkennung: br0+bond0 (Default, UP|GATEWAY) erkannt,
     # lo (nur UP) und eth0 (Subnetz-Route) ausgeschlossen
@@ -1135,7 +1142,6 @@ def _self_test() -> None:
 
 
 if __name__ == "__main__":
-    import sys
     if "--selftest" in sys.argv:
         _self_test()
         sys.exit(0)

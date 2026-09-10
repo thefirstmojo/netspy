@@ -131,6 +131,20 @@ chmod 777 /opt/netspy                   # other hosts
 docker build -t netspy:latest .   # then use image: netspy:latest in the compose
 ```
 
+## Tests
+
+Backend tests need nothing but Python (no browser, no services):
+
+```bash
+python3 test_backend_units.py   # API payload, polling, storage history, config, terminal targets
+python3 app/agent.py --selftest # parser fixtures (ss / route table)
+```
+
+DOM tests render the real `app/static` in Chromium (Playwright) and check the
+terminal tab, the command list tooltip, the filter chips and the resize/auto-scroll
+behaviour — run each script directly: `python3 test_cmdlist.py`,
+`test_filter_audit.py`, `test_resize_autoscroll.py`, `test_terminal_suggested.py`.
+
 ## Planned
 
 - Persistent history (SQLite/InfluxDB) across restarts
