@@ -54,8 +54,46 @@ jobs:
 
       # ---- Docker Hub mirror (same manifest, no second build) -------------
       # Why: CA (Unraid App Store) statistics are Docker Hub pull counts.
-      # A GHCR-only image has none — the mirror gives the app real numbers
-      # in the store ("Downloads"/"Trend") and readable registry metadata.
+      # A GHCR-only image has none — the mirror gives the app real numbers in
+      # the store ("Downloads"/"Trend") plus readable registry metadata.
+      - name: Ensure public Docker Hub repository
+        if: env.DOCKERHUB_ENABLED == 'true'
+        env:
+          DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        # A push to a not-yet-existing repo makes Docker Hub create it with the
+        # account's default privacy (private) while the manifest lands anyway —
+        # the image would be invisible and the registry pull would 401. So the
+        # repo is created/pinned as PUBLIC before mirroring.
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request, urllib.error
+          u, t = os.environ["DH_USER"], os.environ["DH_TOKEN"]
+          def call(url, method="GET", body=None, hdr=None):
+              req = urllib.request.Request(url, method=method,
+                  headers=hdr or {"Content-Type": "application/json"},
+                  data=json.dumps(body).encode() if body else None)
+              try:
+                  r = urllib.request.urlopen(req, timeout=30)
+                  return r.status, (json.loads(r.read() or b"{}") if method != "PATCH" else {})
+              except urllib.error.HTTPError as e:
+                  return e.code, {}
+          st, d = call("https://hub.docker.com/v2/users/login", "POST", {"username": u, "password": t})
+          jwt = d.get("token")
+          if not jwt:
+              print("::warning::Docker Hub login failed - skipping repo provisioning")
+              raise SystemExit(0)
+          h = {"Authorization": "JWT " + jwt, "Content-Type": "application/json"}
+          st, _ = call(f"https://hub.docker.com/v2/repositories/{u}/netspy/", "GET", None, h)
+          if st == 200:
+              st2, _ = call(f"https://hub.docker.com/v2/repositories/{u}/netspy/", "PATCH", {"is_private": False}, h)
+              print(f"repository exists -> set public: HTTP {st2}")
+          else:
+              st2, _ = call("https://hub.docker.com/v2/repositories/", "POST",
+                            {"namespace": u, "name": "netspy", "is_private": False, "registry": "docker"}, h)
+              print(f"repository created as public: HTTP {st2}")
+          PY
+
       - name: Login to Docker Hub
         if: env.DOCKERHUB_ENABLED == 'true'
         uses: docker/login-action@v3
@@ -71,4 +109,32 @@ jobs:
             --tag docker.io/${{ secrets.DOCKERHUB_USERNAME }}/netspy:beta \
             --tag docker.io/${{ secrets.DOCKERHUB_USERNAME }}/netspy:${{ steps.ver.outputs.tag }} \
             ghcr.io/${{ github.repository }}:${{ steps.ver.outputs.tag }}
-          echo "mirrored to docker.io/${{ secrets.DOCKERHUB_USERNAME }}/netspy:beta + :${{ steps.ver.outputs.tag }}"
+
+      - name: Verify mirror is publicly pullable
+        if: env.DOCKERHUB_ENABLED == 'true'
+        env:
+          DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          VERSION_TAG: ${{ steps.ver.outputs.tag }}
+        # Hard gate: the exact anonymous path an Unraid host uses. Fails the
+        # build if the mirror landed private or not at all (silent success).
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request, urllib.error
+          u, v = os.environ["DH_USER"], os.environ["VERSION_TAG"]
+          ok = True
+          for tag in ("beta", v):
+              tok = json.load(urllib.request.urlopen(
+                  f"https://auth.docker.io/token?service=registry.docker.io&scope=repository:{u}/netspy:pull",
+                  timeout=30))["token"]
+              req = urllib.request.Request(
+                  f"https://registry-1.docker.io/v2/{u}/netspy/manifests/{tag}",
+                  headers={"Authorization": "Bearer " + tok,
+                           "Accept": "application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.v2+json"})
+              try:
+                  r = urllib.request.urlopen(req, timeout=30)
+                  print(f"{tag}: HTTP {r.status} digest={r.headers.get('Docker-Content-Digest')}")
+              except urllib.error.HTTPError as e:
+                  print(f"::error::{tag}: HTTP {e.code} - mirror is not publicly pullable")
+                  ok = False
+          raise SystemExit(0 if ok else 1)
+          PY
