@@ -56,6 +56,38 @@ jobs:
           docker tag ghcr.io/${{ github.repository }}:beta docker.io/${{ secrets.DOCKERHUB_USERNAME }}/netspy:beta
           docker push docker.io/${{ secrets.DOCKERHUB_USERNAME }}/netspy:beta
 
+      - name: Control test - push to a NEW repo name
+        run: |
+          docker tag ghcr.io/${{ github.repository }}:beta docker.io/${{ secrets.DOCKERHUB_USERNAME }}/netspy-probe:beta
+          docker push docker.io/${{ secrets.DOCKERHUB_USERNAME }}/netspy-probe:beta
+
+      - name: Hub state for the probe repo
+        env:
+          DU: ${{ secrets.DOCKERHUB_USERNAME }}
+          DT: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          sleep 20
+          python3 - <<'PY'
+          import json, os, urllib.request, urllib.error
+          u, t = os.environ["DU"], os.environ["DT"]
+          r = urllib.request.Request("https://hub.docker.com/v2/users/login",
+              data=json.dumps({"username": u, "password": t}).encode(),
+              headers={"Content-Type": "application/json"}, method="POST")
+          jwt = json.load(urllib.request.urlopen(r, timeout=30))["token"]
+          h = {"Authorization": "JWT " + jwt}
+          for name in ("netspy", "netspy-probe"):
+              try:
+                  d = json.load(urllib.request.urlopen(urllib.request.Request(
+                      f"https://hub.docker.com/v2/repositories/{u}/{name}/", headers=h), timeout=30))
+                  tg = json.load(urllib.request.urlopen(urllib.request.Request(
+                      f"https://hub.docker.com/v2/repositories/{u}/{name}/tags/?page_size=5", headers=h), timeout=30))
+                  print(f"PROBE {name}: status={d.get('status')}/{d.get('status_description')} "
+                        f"is_private={d.get('is_private')} tags={tg.get('count')} "
+                        f"media_types={d.get('media_types')} last_updated={d.get('last_updated')}")
+              except urllib.error.HTTPError as e:
+                  print(f"PROBE {name}: HTTP {e.code}")
+          PY
+
       - name: Print Hub state AFTER
         env:
           DU: ${{ secrets.DOCKERHUB_USERNAME }}
