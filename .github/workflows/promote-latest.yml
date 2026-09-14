@@ -10,13 +10,16 @@ on:
 
 # Sets the :latest tag to an already-built version — used after the beta
 # build was tested and approved. Does NOT rebuild: imagetools.create points
-# :latest at the existing version manifest.
+# :latest at the existing version manifest (GHCR and, if configured, the
+# Docker Hub mirror).
 jobs:
   promote:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    env:
+      DOCKERHUB_ENABLED: ${{ secrets.DOCKERHUB_TOKEN != '' }}
     steps:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
@@ -33,3 +36,18 @@ jobs:
           docker buildx imagetools create \
             --tag ghcr.io/${{ github.repository }}:latest \
             ghcr.io/${{ github.repository }}:${{ inputs.version }}
+
+      - name: Login to Docker Hub
+        if: env.DOCKERHUB_ENABLED == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Promote mirror to :latest
+        if: env.DOCKERHUB_ENABLED == 'true'
+        run: |
+          docker buildx imagetools create \
+            --tag docker.io/${{ secrets.DOCKERHUB_USERNAME }}/netspy:latest \
+            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/netspy:${{ inputs.version }}
