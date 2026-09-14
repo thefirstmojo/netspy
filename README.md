@@ -62,6 +62,7 @@ Real-time monitoring of your servers in one dashboard: **per-interface, per-proc
 |---|---|
 | **Install on Unraid** | It's in the **Unraid Community App Store**: **Apps → NetSpy → Install**. Set `SERVERS` (e.g. `Main=local`) and `AGENT_TOKEN`; everything else has sensible defaults. |
 | **Add an agent** (TrueNAS/Debian/…) | Copy `docker-compose.yml` to that host → set `ROLE: agent`, `SERVERS: ""`, `UPLINK` (e.g. `eth0`), same `AGENT_TOKEN`. On **TrueNAS** also uncomment `security_opt: [apparmor:unconfined]` (minimal relaxation, no `privileged`). Deploy via Portainer stack or `docker compose up -d`. |
+| **Prefer Docker Hub?** | The image is mirrored to `docker.io/thefirstmojo/netspy` — same manifest as GHCR (`vX.Y`, `beta`, `latest`). Pull from either registry. |
 
 All settings stay editable later under **Docker → NetSpy → edit**. Pin the image tag (`ghcr.io/thefirstmojo/netspy:vX.Y`) for deterministic updates; with `:latest` tick "Pull latest image" when updating.
 
