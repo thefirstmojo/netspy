@@ -1,0 +1,81 @@
+name: diag-dockerhub
+
+on:
+  workflow_dispatch:
+
+# Temporary diagnostic: does a REAL `docker push` register the repository on the
+# Docker Hub side, while `buildx imagetools create` (cross-registry copy) did not?
+# Prints the Hub API state before and after.
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login GHCR + Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Print Hub state BEFORE
+        env:
+          DU: ${{ secrets.DOCKERHUB_USERNAME }}
+          DT: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          u, t = os.environ["DU"], os.environ["DT"]
+          r = urllib.request.Request("https://hub.docker.com/v2/users/login",
+              data=json.dumps({"username": u, "password": t}).encode(),
+              headers={"Content-Type": "application/json"}, method="POST")
+          jwt = json.load(urllib.request.urlopen(r, timeout=30))["token"]
+          h = {"Authorization": "JWT " + jwt}
+          d = json.load(urllib.request.urlopen(urllib.request.Request(
+              f"https://hub.docker.com/v2/repositories/{u}/netspy/", headers=h), timeout=30))
+          print("BEFORE:", {k: d.get(k) for k in ("status", "status_description", "last_updated",
+                                                  "media_types", "content_types", "storage_size", "pull_count")})
+          tg = json.load(urllib.request.urlopen(urllib.request.Request(
+              f"https://hub.docker.com/v2/repositories/{u}/netspy/tags/?page_size=5", headers=h), timeout=30))
+          print("BEFORE tags count:", tg.get("count"))
+          PY
+
+      - name: Real pull + tag + push (one tag)
+        run: |
+          docker pull ghcr.io/${{ github.repository }}:beta
+          docker tag ghcr.io/${{ github.repository }}:beta docker.io/${{ secrets.DOCKERHUB_USERNAME }}/netspy:beta
+          docker push docker.io/${{ secrets.DOCKERHUB_USERNAME }}/netspy:beta
+
+      - name: Print Hub state AFTER
+        env:
+          DU: ${{ secrets.DOCKERHUB_USERNAME }}
+          DT: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          sleep 20
+          python3 - <<'PY'
+          import json, os, urllib.request
+          u, t = os.environ["DU"], os.environ["DT"]
+          r = urllib.request.Request("https://hub.docker.com/v2/users/login",
+              data=json.dumps({"username": u, "password": t}).encode(),
+              headers={"Content-Type": "application/json"}, method="POST")
+          jwt = json.load(urllib.request.urlopen(r, timeout=30))["token"]
+          h = {"Authorization": "JWT " + jwt}
+          d = json.load(urllib.request.urlopen(urllib.request.Request(
+              f"https://hub.docker.com/v2/repositories/{u}/netspy/", headers=h), timeout=30))
+          print("AFTER:", {k: d.get(k) for k in ("status", "status_description", "last_updated",
+                                                 "media_types", "content_types", "storage_size", "pull_count")})
+          tg = json.load(urllib.request.urlopen(urllib.request.Request(
+              f"https://hub.docker.com/v2/repositories/{u}/netspy/tags/?page_size=5", headers=h), timeout=30))
+          print("AFTER tags count:", tg.get("count"))
+          print("AFTER first tags:", [x["name"] for x in (tg.get("results") or [])])
+          PY
