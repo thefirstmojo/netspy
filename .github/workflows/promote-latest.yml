@@ -81,3 +81,24 @@ jobs:
               ok = False
           raise SystemExit(0 if ok else 1)
           PY
+
+      - name: Verify promoted content (what :latest really carries)
+        # A promotion is only correct if the image behind :latest is the
+        # approved version — digests alone cannot show that.
+        run: |
+          refs="ghcr.io/${{ github.repository }}:latest"
+          if [ "$DOCKERHUB_ENABLED" = "true" ]; then
+            refs="$refs docker.io/${{ secrets.DOCKERHUB_USERNAME }}/netspy:latest"
+          fi
+          fail=0
+          for ref in $refs; do
+            docker pull -q "$ref" >/dev/null
+            got="$(docker run --rm "$ref" cat /app/VERSION | tr -d '[:space:]')"
+            echo "$ref -> /app/VERSION = $got (expected ${{ inputs.version }})"
+            if [ "v$got" != "${{ inputs.version }}" ]; then
+              echo "::error::$ref carries 'v$got' but '${{ inputs.version }}' was promoted"
+              fail=1
+            fi
+          done
+          exit $fail
+

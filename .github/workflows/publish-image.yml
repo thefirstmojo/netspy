@@ -138,3 +138,19 @@ jobs:
                   ok = False
           raise SystemExit(0 if ok else 1)
           PY
+
+      - name: Verify image content (VERSION baked into the image)
+        # Digest equality only proves the registries agree — this proves the
+        # image really carries the version the repository claims.
+        env:
+          VERSION_TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          expected="$(cat VERSION)"
+          ref="ghcr.io/${{ github.repository }}:${VERSION_TAG}"
+          docker pull -q "$ref" >/dev/null
+          got="$(docker run --rm "$ref" cat /app/VERSION | tr -d '[:space:]')"
+          echo "$ref -> /app/VERSION = $got (VERSION file: $expected)"
+          if [ "$got" != "$expected" ]; then
+            echo "::error::$ref carries '$got' but the repository VERSION says '$expected'"
+            exit 1
+          fi
