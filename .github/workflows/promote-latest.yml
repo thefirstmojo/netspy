@@ -8,10 +8,11 @@ on:
         required: true
         type: string
 
-# Sets the :latest tag to an already-built version — used after the beta
-# build was tested and approved. Does NOT rebuild: imagetools.create points
-# :latest at the existing version manifest (GHCR and, if configured, the
-# Docker Hub mirror).
+# Sets :latest to an already-built version — used after the beta build was
+# tested and approved. Does NOT rebuild: imagetools.create points :latest at
+# the existing version manifest. GHCR is the single source of truth; the
+# Docker Hub mirror is tagged in the same step so both registries always
+# carry the same :latest.
 jobs:
   promote:
     runs-on: ubuntu-latest
@@ -31,12 +32,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Promote version to :latest
-        run: |
-          docker buildx imagetools create \
-            --tag ghcr.io/${{ github.repository }}:latest \
-            ghcr.io/${{ github.repository }}:${{ inputs.version }}
-
       - name: Login to Docker Hub
         if: env.DOCKERHUB_ENABLED == 'true'
         uses: docker/login-action@v3
@@ -45,9 +40,44 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Promote mirror to :latest
-        if: env.DOCKERHUB_ENABLED == 'true'
+      - name: Promote version to :latest (GHCR + mirror)
         run: |
-          docker buildx imagetools create \
-            --tag docker.io/${{ secrets.DOCKERHUB_USERNAME }}/netspy:latest \
-            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/netspy:${{ inputs.version }}
+          tags=(--tag ghcr.io/${{ github.repository }}:latest)
+          if [ "$DOCKERHUB_ENABLED" = "true" ]; then
+            tags+=(--tag docker.io/${{ secrets.DOCKERHUB_USERNAME }}/netspy:latest)
+          fi
+          docker buildx imagetools create "${tags[@]}" \
+            ghcr.io/${{ github.repository }}:${{ inputs.version }}
+          echo "promoted ${{ inputs.version }} to: ${tags[*]}"
+
+      - name: Verify :latest
+        # Hard gate: the anonymous path a host uses. Fails if a promoted
+        # :latest is not publicly pullable in either registry.
+        env:
+          DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request, urllib.error
+          targets = [("ghcr", "https://ghcr.io/token?scope=repository:%s:pull&service=ghcr.io" % os.environ["GITHUB_REPOSITORY"],
+                      "https://ghcr.io/v2/%s/manifests/latest" % os.environ["GITHUB_REPOSITORY"])]
+          if os.environ.get("DH_USER"):
+              u = os.environ["DH_USER"]
+              targets.append(("docker.io", f"https://auth.docker.io/token?service=registry.docker.io&scope=repository:{u}/netspy:pull",
+                              f"https://registry-1.docker.io/v2/{u}/netspy/manifests/latest"))
+          digests, ok = {}, True
+          for name, tokurl, man in targets:
+              tok = json.load(urllib.request.urlopen(tokurl, timeout=30))["token"]
+              try:
+                  r = urllib.request.urlopen(urllib.request.Request(man,
+                      headers={"Authorization": "Bearer " + tok,
+                               "Accept": "application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.v2+json"}), timeout=30)
+                  digests[name] = r.headers.get("Docker-Content-Digest")
+                  print(f"{name}:latest HTTP {r.status} digest={digests[name]}")
+              except urllib.error.HTTPError as e:
+                  print(f"::error::{name}:latest HTTP {e.code}")
+                  ok = False
+          if len(digests) == 2 and len(set(digests.values())) != 1:
+              print("::error::registries disagree on :latest digest")
+              ok = False
+          raise SystemExit(0 if ok else 1)
+          PY
