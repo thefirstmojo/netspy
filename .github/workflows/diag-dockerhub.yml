@@ -3,9 +3,9 @@ name: diag-dockerhub
 on:
   workflow_dispatch:
 
-# Temporary diagnostic: does a REAL `docker push` register the repository on the
-# Docker Hub side, while `buildx imagetools create` (cross-registry copy) did not?
-# Prints the Hub API state before and after.
+# Content verification: pulls the published images and prints the version baked
+# into them (/app/VERSION). Digest equality alone would not prove that :latest
+# really carries the approved release.
 jobs:
   diag:
     runs-on: ubuntu-latest
@@ -22,92 +22,23 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
       - uses: docker/login-action@v3
         with:
           registry: docker.io
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Print Hub state BEFORE
-        env:
-          DU: ${{ secrets.DOCKERHUB_USERNAME }}
-          DT: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Version baked into each published tag
         run: |
-          python3 - <<'PY'
-          import json, os, urllib.request
-          u, t = os.environ["DU"], os.environ["DT"]
-          r = urllib.request.Request("https://hub.docker.com/v2/users/login",
-              data=json.dumps({"username": u, "password": t}).encode(),
-              headers={"Content-Type": "application/json"}, method="POST")
-          jwt = json.load(urllib.request.urlopen(r, timeout=30))["token"]
-          h = {"Authorization": "JWT " + jwt}
-          d = json.load(urllib.request.urlopen(urllib.request.Request(
-              f"https://hub.docker.com/v2/repositories/{u}/netspy/", headers=h), timeout=30))
-          print("BEFORE:", {k: d.get(k) for k in ("status", "status_description", "last_updated",
-                                                  "media_types", "content_types", "storage_size", "pull_count")})
-          tg = json.load(urllib.request.urlopen(urllib.request.Request(
-              f"https://hub.docker.com/v2/repositories/{u}/netspy/tags/?page_size=5", headers=h), timeout=30))
-          print("BEFORE tags count:", tg.get("count"))
-          PY
-
-      - name: Real pull + tag + push (one tag)
-        run: |
-          docker pull ghcr.io/${{ github.repository }}:beta
-          docker tag ghcr.io/${{ github.repository }}:beta docker.io/${{ secrets.DOCKERHUB_USERNAME }}/netspy:beta
-          docker push docker.io/${{ secrets.DOCKERHUB_USERNAME }}/netspy:beta
-
-      - name: Control test - push to a NEW repo name
-        run: |
-          docker tag ghcr.io/${{ github.repository }}:beta docker.io/${{ secrets.DOCKERHUB_USERNAME }}/netspy-probe:beta
-          docker push docker.io/${{ secrets.DOCKERHUB_USERNAME }}/netspy-probe:beta
-
-      - name: Hub state for the probe repo
-        env:
-          DU: ${{ secrets.DOCKERHUB_USERNAME }}
-          DT: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: |
-          sleep 20
-          python3 - <<'PY'
-          import json, os, urllib.request, urllib.error
-          u, t = os.environ["DU"], os.environ["DT"]
-          r = urllib.request.Request("https://hub.docker.com/v2/users/login",
-              data=json.dumps({"username": u, "password": t}).encode(),
-              headers={"Content-Type": "application/json"}, method="POST")
-          jwt = json.load(urllib.request.urlopen(r, timeout=30))["token"]
-          h = {"Authorization": "JWT " + jwt}
-          for name in ("netspy", "netspy-probe"):
-              try:
-                  d = json.load(urllib.request.urlopen(urllib.request.Request(
-                      f"https://hub.docker.com/v2/repositories/{u}/{name}/", headers=h), timeout=30))
-                  tg = json.load(urllib.request.urlopen(urllib.request.Request(
-                      f"https://hub.docker.com/v2/repositories/{u}/{name}/tags/?page_size=5", headers=h), timeout=30))
-                  print(f"PROBE {name}: status={d.get('status')}/{d.get('status_description')} "
-                        f"is_private={d.get('is_private')} tags={tg.get('count')} "
-                        f"media_types={d.get('media_types')} last_updated={d.get('last_updated')}")
-              except urllib.error.HTTPError as e:
-                  print(f"PROBE {name}: HTTP {e.code}")
-          PY
-
-      - name: Print Hub state AFTER
-        env:
-          DU: ${{ secrets.DOCKERHUB_USERNAME }}
-          DT: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: |
-          sleep 20
-          python3 - <<'PY'
-          import json, os, urllib.request
-          u, t = os.environ["DU"], os.environ["DT"]
-          r = urllib.request.Request("https://hub.docker.com/v2/users/login",
-              data=json.dumps({"username": u, "password": t}).encode(),
-              headers={"Content-Type": "application/json"}, method="POST")
-          jwt = json.load(urllib.request.urlopen(r, timeout=30))["token"]
-          h = {"Authorization": "JWT " + jwt}
-          d = json.load(urllib.request.urlopen(urllib.request.Request(
-              f"https://hub.docker.com/v2/repositories/{u}/netspy/", headers=h), timeout=30))
-          print("AFTER:", {k: d.get(k) for k in ("status", "status_description", "last_updated",
-                                                 "media_types", "content_types", "storage_size", "pull_count")})
-          tg = json.load(urllib.request.urlopen(urllib.request.Request(
-              f"https://hub.docker.com/v2/repositories/{u}/netspy/tags/?page_size=5", headers=h), timeout=30))
-          print("AFTER tags count:", tg.get("count"))
-          print("AFTER first tags:", [x["name"] for x in (tg.get("results") or [])])
-          PY
+          set -x
+          for ref in \
+            ghcr.io/${{ github.repository }}:latest \
+            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/netspy:latest \
+            ghcr.io/${{ github.repository }}:beta \
+            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/netspy:beta \
+            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/netspy:v0.7.35 ; do
+            docker pull -q "$ref" >/dev/null
+            printf 'VERSION-CHECK %s -> %s\n' "$ref" "$(docker run --rm "$ref" cat /app/VERSION)"
+            printf 'DIGEST-CHECK  %s -> %s\n' "$ref" "$(docker inspect --format '{{index .RepoDigests 0}}' "$ref" | sed 's/.*@//')"
+          done
