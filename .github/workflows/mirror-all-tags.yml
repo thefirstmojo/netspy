@@ -9,10 +9,14 @@ on:
         type: boolean
         default: false
 
-# One-off / re-runnable backfill: mirrors EVERY tag that exists on GHCR to the
+# One-off / re-runnable backfill: mirrors EVERY working tag from GHCR to the
 # Docker Hub mirror, so both registries carry an identical tag set with
-# identical digests (1:1). The tag list is read live from GHCR — nothing is
-# hardcoded, so re-running this is always safe and idempotent.
+# identical digests. The tag list is read live from GHCR — nothing hardcoded,
+# so re-running is always safe and idempotent.
+#
+# Tags that are already broken in GHCR (manifest index whose child manifests
+# were garbage-collected) are skipped and reported — they cannot be pulled
+# from GHCR either, so a 1:1 copy is impossible by definition.
 #
 # Normal releases do NOT need this workflow: publish-image.yml mirrors the new
 # version tag + :beta on every push, promote-latest.yml keeps :latest in sync.
@@ -43,32 +47,62 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Collect tag list from GHCR
+      - name: Collect tags + check completeness in GHCR
         run: |
-          python3 - <<'PY' > tags.txt
-          import json, os, urllib.request
+          python3 - <<'PY'
+          import json, os, urllib.request, urllib.error
           repo = os.environ["REPO_SLUG"]
+          accept = ("application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,"
+                    "application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json")
           tok = json.load(urllib.request.urlopen(
               f"https://ghcr.io/token?scope=repository:{repo}:pull&service=ghcr.io", timeout=30))["token"]
-          lst = json.load(urllib.request.urlopen(urllib.request.Request(
-              f"https://ghcr.io/v2/{repo}/tags/list", headers={"Authorization": "Bearer " + tok}), timeout=30))
-          for t in sorted(lst.get("tags") or []):
-              print(t)
-          PY
-          echo "Tags on GHCR: $(wc -l < tags.txt)"
+          hdrs = {"Authorization": "Bearer " + tok, "Accept": accept}
 
-      - name: Mirror every tag to Docker Hub
+          def fetch(path):
+              try:
+                  r = urllib.request.urlopen(urllib.request.Request(
+                      f"https://ghcr.io/v2/{repo}/{path}", headers=hdrs), timeout=30)
+                  return r.status, dict(r.headers), r.read()
+              except urllib.error.HTTPError as e:
+                  return e.code, dict(e.headers), b""
+
+          tags = json.load(urllib.request.urlopen(urllib.request.Request(
+              f"https://ghcr.io/v2/{repo}/tags/list", headers=hdrs), timeout=30))["tags"]
+          good, bad = [], []
+          for t in sorted(tags or []):
+              st, h, body = fetch(f"manifests/{t}")
+              if st != 200:
+                  bad.append((t, f"tag HTTP {st}")); continue
+              mt = h.get("Content-Type", "")
+              if "index" in mt or "list" in mt:
+                  try:
+                      idx = json.loads(body)
+                  except Exception:
+                      bad.append((t, "index unreadable")); continue
+                  missing = [m["digest"][:19] for m in idx.get("manifests", []) if fetch(f"manifests/{m['digest']}")[0] != 200]
+                  if missing:
+                      bad.append((t, "missing child manifests: " + ", ".join(missing))); continue
+              good.append(t)
+          open("tags.txt", "w").write("\n".join(good) + "\n")
+          open("skipped.txt", "w").write("\n".join(f"{t}\t{w}" for t, w in bad) + "\n")
+          print(f"tags on GHCR: {len(tags)} | mirrorable: {len(good)} | broken in GHCR: {len(bad)}")
+          for t, w in bad:
+              print(f"::warning::skipping {t} - broken in GHCR ({w})")
+          PY
+
+      - name: Mirror every working tag to Docker Hub
         if: ${{ inputs.dry_run == false }}
         run: |
-          set -euo pipefail
-          n=0
+          n=0; failed=0
           while read -r tag; do
             [ -z "$tag" ] && continue
-            docker buildx imagetools create --tag "$DH_REPO:$tag" "ghcr.io/$REPO_SLUG:$tag"
-            n=$((n + 1))
-            echo "mirrored ($n): $tag"
+            if docker buildx imagetools create --tag "$DH_REPO:$tag" "ghcr.io/$REPO_SLUG:$tag"; then
+              n=$((n + 1)); echo "mirrored ($n): $tag"
+            else
+              failed=$((failed + 1)); echo "::warning::mirror failed for $tag"; echo "$tag" >> failed.txt
+            fi
           done < tags.txt
-          echo "mirrored $n tags"
+          echo "mirrored: $n | failed: $failed"
 
       - name: Verify 1:1 (tag set + digest per tag)
         if: ${{ inputs.dry_run == false }}
@@ -77,7 +111,8 @@ jobs:
           import json, os, urllib.request, urllib.error
           repo = os.environ["REPO_SLUG"]
           dh = os.environ["DH_REPO"].replace("docker.io/", "")
-          accept = "application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json"
+          accept = ("application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.v2+json,"
+                    "application/vnd.docker.distribution.manifest.list.v2+json")
 
           def token(kind):
               if kind == "ghcr":
@@ -87,11 +122,11 @@ jobs:
                   f"https://auth.docker.io/token?service=registry.docker.io&scope=repository:{dh}:pull", timeout=30))["token"]
 
           def digest(kind, tag):
-              host = "ghcr.io/v2/" + repo if kind == "ghcr" else "registry-1.docker.io/v2/" + dh
-              req = urllib.request.Request(f"https://{host}/manifests/{tag}",
-                  headers={"Authorization": "Bearer " + token(kind), "Accept": accept})
+              host = f"ghcr.io/v2/{repo}" if kind == "ghcr" else f"registry-1.docker.io/v2/{dh}"
               try:
-                  return urllib.request.urlopen(req, timeout=30).headers.get("Docker-Content-Digest")
+                  r = urllib.request.urlopen(urllib.request.Request(f"https://{host}/manifests/{tag}",
+                      headers={"Authorization": "Bearer " + token(kind), "Accept": accept}), timeout=30)
+                  return r.headers.get("Docker-Content-Digest")
               except urllib.error.HTTPError as e:
                   return None if e.code == 404 else f"HTTP {e.code}"
 
@@ -102,12 +137,13 @@ jobs:
               if b is None:
                   missing.append(t)
               elif a != b:
-                  mismatch.append((t, a, b))
-          print(f"tags checked: {len(tags)}")
-          print(f"missing on Docker Hub: {len(missing)} {missing[:10]}")
-          print(f"digest mismatches    : {len(mismatch)} {[m[0] for m in mismatch][:10]}")
+                  mismatch.append(t)
+          print(f"checked: {len(tags)} | missing on Docker Hub: {len(missing)} {missing[:8]} | digest mismatches: {len(mismatch)} {mismatch[:8]}")
           if missing or mismatch:
               print("::error::mirror is NOT 1:1")
               raise SystemExit(1)
-          print("1:1 verified - every GHCR tag exists on Docker Hub with the same digest")
+          print(f"1:1 verified: every mirrorable GHCR tag exists on Docker Hub with the same digest")
+          skipped = [l.split("\t")[0] for l in open("skipped.txt") if l.strip()]
+          if skipped:
+              print(f"not mirrorable (already broken in GHCR): {', '.join(skipped)}")
           PY
