@@ -301,6 +301,70 @@ def test_storage_month_rollover():
               st._bump(entry, sep + 60) is False)
 
 
+def test_storage_m1_32_days():
+    print("StorageStore m1 (1 month = 32 days)")
+    with tempfile.TemporaryDirectory() as td:
+        st = StorageStore(td)
+        day = 86400
+        now = time.mktime((2026, 1, 1, 12, 0, 0, 0, 0, -1))
+        entry = {"used": 100}
+        st._bump(entry, now)
+        check("m1 created on the first tick", len(entry["m1"]) == 1)
+        check("m1 holds the current day",
+              entry["m1"][0][2] == time.localtime(int(now)).tm_yday)
+        entry["used"] = 150
+        st._bump(entry, now + 600)
+        check("m1 live value updated in place",
+              len(entry["m1"]) == 1 and entry["m1"][-1][1] == 150)
+        for i in range(1, 41):          # 40 Tage -> Kappe bei 32
+            entry["used"] = 100 + i
+            st._bump(entry, now + i * day)
+        check("m1 capped at 32 days", len(entry["m1"]) == 32)
+        check("m1 keeps the newest value", entry["m1"][-1][1] == 140)
+        check("m1 spans exactly 32 days",
+              int(entry["m1"][-1][0] - entry["m1"][0][0]) == 31 * day)
+        check("d7 still capped at 7 with m1 active", len(entry["d7"]) == 7)
+
+
+def test_storage_short_points_survive():
+    print("StorageStore tolerates shortened [ts, used] points (hand-edited JSON)")
+    with tempfile.TemporaryDirectory() as td:
+        st = StorageStore(td)
+        now = time.mktime((2026, 3, 7, 12, 0, 0, 0, 0, -1))
+        entry = {"used": 42, "h24": [[int(now) - 60, 40]],
+                 "d7": [[int(now) - 86400, 30]],          # ohne Tagesmarke
+                 "m1": [[int(now) - 86400, 30]]}          # ohne Tagesmarke
+        try:
+            st._bump(entry, now)
+            crashed = None
+        except Exception as e:                            # noqa: BLE001
+            crashed = e
+        check("_bump does not raise on shortened points", crashed is None, repr(crashed))
+        check("m1 got a well-formed new point",
+              len(entry["m1"]) == 2 and len(entry["m1"][-1]) == 3
+              and entry["m1"][-1][1] == 42)
+        check("d7 got a well-formed new point",
+              len(entry["d7"]) == 2 and len(entry["d7"][-1]) == 3)
+        check("old shortened points are kept (no data loss)",
+              entry["m1"][0] == [int(now) - 86400, 30])
+
+
+def test_storage_m1_migration():
+    print("StorageStore m1 seeded from existing daily points")
+    with tempfile.TemporaryDirectory() as td:
+        st = StorageStore(td)
+        base = time.mktime((2026, 5, 1, 12, 0, 0, 0, 0, -1))
+        d7 = [[int(base + i * 86400), 10 * i,
+               time.localtime(int(base + i * 86400)).tm_yday] for i in range(5)]
+        entry = {"used": 55, "h24": [[int(base), 50]], "d7": d7}
+        st._bump(entry, base + 5 * 86400)
+        check("m1 seeded with the existing real daily points",
+              len(entry["m1"]) == 6)
+        check("m1 keeps the old values (no projection)",
+              [p[1] for p in entry["m1"][:5]] == [0, 10, 20, 30, 40])
+        check("m1 last point carries the current value", entry["m1"][-1][1] == 55)
+
+
 def test_storage_toggle_delete_roundtrip():
     print("StorageStore toggle/delete/persistence")
     with tempfile.TemporaryDirectory() as td:
@@ -448,6 +512,9 @@ def main() -> int:
                test_parsing,
                test_storage_bump,
                test_storage_month_rollover,
+               test_storage_m1_32_days,
+               test_storage_short_points_survive,
+               test_storage_m1_migration,
                test_storage_toggle_delete_roundtrip,
                test_fetch_scheme_guard,
                test_terminal_manager,

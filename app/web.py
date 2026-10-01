@@ -549,6 +549,8 @@ class StorageStore:
     - h24: stündlicher Wert, max 24 Einträge (24 h)
     - d7:  täglicher Wert — der heutige Eintrag wird live gehalten (60-s-Ticks),
            beim Tageswechsel fixiert; max 7 Einträge
+    - m1:  Tageswert über 32 Tage ("1 Monat" = 32 Tage) — heutiger Eintrag
+           wird live gehalten, beim Tageswechsel fixiert; max 32 Einträge
     - m:   Monats-Endstand (letzter fixierter Tageswert beim Monatswechsel),
            max 12 Einträge (nur die letzten 12 Monate)
     - Ein Laufwerk, das nicht mehr sichtbar ist, BEHÄLT seine Daten
@@ -610,7 +612,8 @@ class StorageStore:
         """60-s-Tick: protokollierte + sichtbare Laufwerke fortschreiben.
 
         Die Datei wird NUR bei persistenzrelevanten Ereignissen geschrieben
-        (stündlicher h24-Punkt, Tages-/Monatswechsel) — nicht bei jedem Tick.
+        (stündlicher h24-Punkt, Tages-/Monatswechsel inkl. 32-Tage-Reihe) —
+        nicht bei jedem Tick.
         Der d7-Live-Wert bleibt im RAM minütlich aktuell (fuer die API/Graph).
         """
         persist = False
@@ -645,11 +648,26 @@ class StorageStore:
         # d7: heutiger Eintrag live halten (RAM), beim Tageswechsel fixieren
         d = entry.setdefault("d7", [])
         today = time.localtime(now_i).tm_yday
-        if d and d[-1][2] == today:
+        if d and len(d[-1]) > 2 and d[-1][2] == today:
             d[-1] = [now_i, entry["used"], today]
         else:
             d.append([now_i, entry["used"], today])
             del d[:-7]
+            persist = True
+        # m1: "1 Monat" = 32 Tage, gleiche Live-Logik wie d7. Beim ersten Lauf
+        # aus den bereits vorhandenen Tageswerten (d7) vorbelegt, damit der
+        # Monatsgraph sofort echte Daten zeigt statt einer Projektion.
+        m1 = entry.get("m1")
+        if m1 is None:
+            m1 = [[p[0], p[1], p[2]] for p in d if len(p) > 2]
+            entry["m1"] = m1
+        # Tagesmarke nur lesen, wenn der letzte Punkt sie hat (verkürzte
+        # [ts, used]-Punkte aus handgeänderter JSON dürfen nicht crashen)
+        if m1 and len(m1[-1]) > 2 and m1[-1][2] == today:
+            m1[-1] = [now_i, entry["used"], today]
+        else:
+            m1.append([now_i, entry["used"], today])
+            del m1[:-32]
             persist = True
         # m: Monats-Endstand beim Monatswechsel übernehmen.
         # Baseline (erster Tick): last_month setzen, KEIN rückwirkender Wert.
@@ -739,6 +757,7 @@ class WebHandler(BaseHTTPRequestHandler):
                     "used": e.get("used", 0), "created": e.get("created", 0),
                     "h24": h24,
                     "d7": [[p[0], p[1]] for p in e.get("d7", [])],
+                    "m1": [[p[0], p[1]] for p in e.get("m1", [])],
                     "m": e.get("m", e.get("w", [])),  # Monate (alt: Wochen)
                 }
             body = json.dumps({

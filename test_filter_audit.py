@@ -30,10 +30,12 @@ STORAGE = {
     "recorded": {
         "Unraid:cache": {"name": "cache", "server": "Unraid", "type": "btrfs",
                          "size": 6e11, "used": 2e11, "created": T - 100,
-                         "h24": [[T - 60, 2e11]], "d7": [], "m": []},
+                         "h24": [[T - 60, 2e11]], "d7": [],
+                         "m1": [[T - 60, 2e11]], "m": []},
         "TrueNAS:tank": {"name": "tank", "server": "TrueNAS", "type": "zfs",
                          "size": 4e13, "used": 2e13, "created": T - 100,
-                         "h24": [[T - 60, 2e13]], "d7": [], "m": []},
+                         "h24": [[T - 60, 2e13]], "d7": [],
+                         "m1": [[T - 60, 2e13]], "m": []},
     },
     "host_access": {n: True for n in MON_SERVERS},
 }
@@ -166,6 +168,24 @@ with sync_playwright() as pw:
     grid_txt = pg.locator("#storagegrid").inner_text()
     check("Storage: tank nach Abwahl weg", "tank" not in grid_txt)
     check("Storage: cache (Unraid) bleibt", "cache" in grid_txt)
+    # Zeitbereiche je Karte: 24 h / 7 d / 1 m (32 Tage) / 12 m
+    card0 = pg.locator("#storagegrid .stcard").first
+    check("Storage: 4 Zeitbereich-Buttons je Karte",
+          card0.locator(".stmodes [data-mode]").count() == 4)
+    check("Storage: '1 m' (32 Tage) als eigener Button",
+          card0.locator(".stmodes [data-mode='m1']").inner_text().strip() == "1 m")
+    check("Storage: '12 m' weiterhin vorhanden",
+          card0.locator(".stmodes [data-mode='m']").count() == 1)
+    pg.click("#stmode-1m"); pg.wait_for_timeout(400)
+    modes = pg.evaluate("() => [...document.querySelectorAll("
+                        "'#storagegrid .stmodes .chip-btn.active')].map(b => b.dataset.mode)")
+    check(f"Storage: globaler 1-m-Knopf stellt alle Karten um ({modes})",
+          bool(modes) and set(modes) == {"m1"})
+    axes = pg.evaluate("() => [...document.querySelectorAll('#storagegrid canvas')]"
+                       ".map(c => { const ch = Chart.getChart(c); return ch ? ch.data.labels.length : -1; })")
+    # 32 projizierte Tage (Auffüllung) + 1 echter Punkt aus der Fixture
+    check(f"Storage: 32-Tage-Achse gespannt ({axes[:2]})",
+          bool(axes) and all(32 <= a <= 33 for a in axes))
 
     # ---- TrueNAS wieder an -> Karten/Tabellen kommen zurueck ----
     pg.locator("input[data-srv='TrueNAS']").check()

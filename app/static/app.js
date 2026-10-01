@@ -605,7 +605,7 @@ function renderDiskTable(table, servers) {
 let storageData = null;
 let lastStorageLoad = 0;
 let storageCharts = {};  // key:serie -> Chart (für sauberes destroy beim Re-Render)
-let storageMode = {};    // key -> "h24" | "d7" | "m" (gewählter Zeitbereich je Karte)
+let storageMode = {};    // key -> "h24" | "d7" | "m1" | "m" (Zeitbereich je Karte)
 let storageKeys = [];    // alle bekannten Keys (für globale Modus-Umschaltung)
 let storageScale = "full";  // "full" (0-100%) | "zoom" (Messbereich)
 let storageOrder = [];   // Karten-Reihenfolge (Drag & Drop, localStorage)
@@ -693,12 +693,16 @@ function renderStorage() {
       const p = stPct(size, used);
       const gone = !av.name;
       const isRec = true;  // Karten zeigen nur enabled Laufwerke
-      const hasData = (rec.h24 && rec.h24.length) || (rec.d7 && rec.d7.length);
+      const hasData = (rec.h24 && rec.h24.length) || (rec.d7 && rec.d7.length) || (rec.m1 && rec.m1.length);
       // Auffüll-Markierung: gestrichelte Linie wenn (noch) keine Realdaten
-      const filled = !((rec.h24 && rec.h24.length) || (rec.d7 && rec.d7.length) || (rec.m && rec.m.length));
+      const filled = !((rec.h24 && rec.h24.length) || (rec.d7 && rec.d7.length)
+        || (rec.m1 && rec.m1.length) || (rec.m && rec.m.length));
       const sname = esc(server), sn = esc(name), skey = esc(key);
       const mode = storageMode[key] || "h24";
-      const modeBtn = m => `<button class="chip-btn ${mode === m ? "active" : ""}" data-mode="${m}" data-key="${skey}">${m === "h24" ? "24 h" : m === "d7" ? "7 d" : "12 m"}</button>`;
+      const MODE_LABEL = { h24: "24 h", d7: "7 d", m1: "1 m", m: "12 m" };
+      const MODE_TITLE = { h24: "Last 24 hours", d7: "Last 7 days",
+                           m1: "Last 32 days (1 month)", m: "Last 12 months" };
+      const modeBtn = m => `<button class="chip-btn ${mode === m ? "active" : ""}" data-mode="${m}" data-key="${skey}" title="${MODE_TITLE[m] || ""}">${MODE_LABEL[m] || m}</button>`;
       return `<div class="stcard${gone ? " gone" : ""}" data-key="${skey}" draggable="true">
         <div class="sthead">
           <span class="stdrag" aria-hidden="true" title="">⠿</span>
@@ -711,7 +715,7 @@ function renderStorage() {
         </div>
         <div class="stbar"><div class="stbar-fill" style="width:${Math.min(p, 100)}%"></div></div>
         <div class="stchartbig"><canvas data-k="${skey}" data-s="${mode}"></canvas></div>
-        <div class="stmodes">${modeBtn("h24")}${modeBtn("d7")}${modeBtn("m")}</div>
+        <div class="stmodes">${modeBtn("h24")}${modeBtn("d7")}${modeBtn("m1")}${modeBtn("m")}</div>
         <div class="stactions">
           <button class="chip-btn ${isRec ? "active" : ""}" data-act="toggle" data-key="${skey}">${isRec ? "⏹ stop recording" : "⏺ record"}</button>
           ${hasData ? `<button class="chip-btn danger" data-act="delete" data-key="${skey}">🗑️ delete data</button>` : ""}
@@ -722,17 +726,19 @@ function renderStorage() {
     grid.querySelectorAll(".stchartbig canvas").forEach(c => {
       const key = c.dataset.k, serie = c.dataset.s;
       const rec = (recorded || {})[key] || {};
-      const points = (serie === "h24" ? rec.h24 : serie === "d7" ? rec.d7 : rec.m) || [];
+      const points = { h24: rec.h24, d7: rec.d7, m1: rec.m1, m: rec.m }[serie] || [];
       const size = rec.size || ((available || {})[key] || {}).size || 0;
       const usedNow = (rec.used != null ? rec.used : ((available || {})[key] || {}).used) || 0;
       const old = Chart.getChart(c);
       if (old) old.destroy();
       if (!size) return;  // ohne Größe keine sinnvolle Chart
-      // X-Achsen-Label je Modus: 24 h -> nur Uhrzeit, 7 d -> Tag 1-31, 12 m -> Monat 1-12
+      // X-Achsen-Label je Modus: 24 h -> Uhrzeit, 7 d -> Tag, 1 m -> Tag.Monat,
+      // 12 m -> Monat
       const fmtL = t => {
         const d = new Date(t);
         if (serie === "h24") return d.toLocaleString([], { hour: "2-digit", minute: "2-digit", hour12: false });
         if (serie === "d7") return d.toLocaleString([], { day: "numeric" });
+        if (serie === "m1") return d.toLocaleString([], { day: "2-digit", month: "2-digit" });
         return d.toLocaleString([], { month: "numeric" });
       };
       const labels = points.map(pp => fmtL(pp[0] * 1000));
@@ -742,8 +748,9 @@ function renderStorage() {
       // Graphen von links (Vergangenheit) bis rechts (jetzt): Lücken VOR den
       // ersten echten Daten UND NACH dem letzten echten Punkt bis jetzt.
       const nowMs = Date.now();
-      const horizon = serie === "h24" ? 24 * 3600 : serie === "d7" ? 7 * 86400 : 360 * 86400;
-      const step = serie === "h24" ? 3600 : serie === "d7" ? 86400 : 30 * 86400;
+      const horizon = serie === "h24" ? 24 * 3600 : serie === "d7" ? 7 * 86400
+        : serie === "m1" ? 32 * 86400 : 360 * 86400;
+      const step = serie === "h24" ? 3600 : serie === "m1" || serie === "d7" ? 86400 : 30 * 86400;
       const curVal = data.length ? data[data.length - 1] : (size > 0 ? +((usedNow / size) * 100).toFixed(1) : 0);
       const firstReal = points.length ? points[0][0] * 1000 : nowMs;
       const lastReal = points.length ? points[points.length - 1][0] * 1000 : nowMs;
@@ -871,7 +878,7 @@ function renderStorage() {
       const p = stPct(size, used);
       const gone = !av.name;
       const isRec = (enabled || []).includes(k);
-      const hasData = (rec.h24 && rec.h24.length) || (rec.d7 && rec.d7.length);
+      const hasData = (rec.h24 && rec.h24.length) || (rec.d7 && rec.d7.length) || (rec.m1 && rec.m1.length);
       const hasKids = stKidsOf(server, av.path || k).length > 0;
       const open = expSet.has(k);
       const pctStyle = p > 90 ? "color:#f87171" : p > 75 ? "color:#fbbf24" : "";
@@ -925,7 +932,7 @@ function renderStorage() {
   // denselben Modus haben; sonst keiner (Karten wurden einzeln umgestellt)
   const uniModes = new Set(storageKeys.map(k => storageMode[k] || "h24"));
   const uni = uniModes.size === 1 ? [...uniModes][0] : null;
-  [["h24", "stmode-24"], ["d7", "stmode-7"], ["m", "stmode-m"]].forEach(([m, id]) => {
+  [["h24", "stmode-24"], ["d7", "stmode-7"], ["m1", "stmode-1m"], ["m", "stmode-m"]].forEach(([m, id]) => {
     const b = document.getElementById(id);
     if (b) b.classList.toggle("active", uni === m);
   });
@@ -1339,6 +1346,7 @@ function setStorageModeAll(mode) {
 }
 document.getElementById("stmode-24").addEventListener("click", () => setStorageModeAll("h24"));
 document.getElementById("stmode-7").addEventListener("click", () => setStorageModeAll("d7"));
+document.getElementById("stmode-1m").addEventListener("click", () => setStorageModeAll("m1"));
 document.getElementById("stmode-m").addEventListener("click", () => setStorageModeAll("m"));
 /* Gespeicherte Skala beim Laden auf die Buttons uebertragen */
 if (storageScale === "zoom") {

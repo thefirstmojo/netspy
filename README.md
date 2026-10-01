@@ -32,7 +32,7 @@ Real-time monitoring of your servers in one dashboard: **per-interface, per-proc
 - Display mode switch: **live** (EMA) or **10 s rolling average** (⚡ / 📊 buttons)
 
 ### 💾 Storage tab
-- Fill levels of the host's **top-level** filesystems/pools (no container-volume subfolders) — compact drive list plus one big line chart per recorded drive: **24 h** (hourly), **7 d** (daily, today live until midnight), **months** (month-end value)
+- Fill levels of the host's **top-level** filesystems/pools (no container-volume subfolders) — compact drive list plus one big line chart per recorded drive: **24 h** (hourly), **7 d** (daily, today live until midnight), **1 m** (one month = 32 daily points, today live until midnight), **12 m** (month-end value)
 - Recording is **opt-in per drive** (⏺ in the list) — activating a drive creates its chart; nothing is written automatically; data survives restarts (`storage_history.json` in `/netspy/data`)
 - Drives that disappear keep their data until you delete it (🗑️ button)
 
