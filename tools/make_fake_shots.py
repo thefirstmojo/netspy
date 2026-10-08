@@ -70,11 +70,12 @@ DISK = [
 ]
 
 SYSROWS = [
-    {"name": "tdarr", "container": "media", "cpu": 41.2, "mem": 780 * 1024 * 1024},
-    {"name": "ffmpeg", "container": None, "cpu": 87.5, "mem": 120 * 1024 * 1024},
-    {"name": "postgres", "container": "db", "cpu": 3.4, "mem": 640 * 1024 * 1024},
-    {"name": "nginx", "container": "web", "cpu": 1.1, "mem": 85 * 1024 * 1024},
-    {"name": "python3", "container": None, "cpu": 0.8, "mem": 60 * 1024 * 1024},
+    # CPU in Prozent EINES Kerns (wie top/htop) - 100 % = ein Thread voll
+    {"name": "ffmpeg", "container": None, "cpu": 386.4, "mem": 1.9 * 1024 ** 3},
+    {"name": "tdarr", "container": "media", "cpu": 118.7, "mem": 780 * 1024 * 1024},
+    {"name": "postgres", "container": "db", "cpu": 9.8, "mem": 640 * 1024 * 1024},
+    {"name": "nginx", "container": "web", "cpu": 3.2, "mem": 85 * 1024 * 1024},
+    {"name": "python3", "container": None, "cpu": 2.1, "mem": 60 * 1024 * 1024},
 ]
 
 FAKE = {

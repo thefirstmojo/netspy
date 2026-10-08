@@ -946,7 +946,7 @@ function buildSysHeader(servers) {
   thead.innerHTML = `<tr>` +
     `<th data-key="name" class="${cls("name")}">Process</th>` +
     `<th data-key="server" class="${cls("server")}">Server</th>` +
-    `<th data-key="cpu" class="sortable num ${state.sysSortKey === "cpu" ? "active" + (state.sysSortDir < 0 ? " sort-desc" : "") : ""}">CPU%</th>` +
+    `<th data-key="cpu" class="sortable num ${state.sysSortKey === "cpu" ? "active" + (state.sysSortDir < 0 ? " sort-desc" : "") : ""}" title="Share of ONE core (100 % = one core fully used), like top/htop/docker stats">CPU%</th>` +
     `<th data-key="mem" class="sortable num ${state.sysSortKey === "mem" ? "active" + (state.sysSortDir < 0 ? " sort-desc" : "") : ""}">RAM</th>` +
     `</tr>`;
 }
@@ -958,7 +958,7 @@ function renderSysHosts(host_sys, servers) {
     const h = (host_sys && host_sys[s.name]) || {};
     const memPct = h.mem_total > 0 ? Math.round(((h.mem_used || 0) / h.mem_total) * 100) : 0;
     const cpuV = state.cpuMode === "avg10" ? h.cpu10 : h.cpu;
-    return `<span class="syschip" title="Host total">${esc(s.name)}: ` +
+    return `<span class="syschip" title="Host total across all cores (0-100 %)">${esc(s.name)}: ` +
       `<b style="color:#22d3ee">CPU ${cpuV == null ? "–" : cpuV + "%"}</b> · ` +
       `<b style="color:#a78bfa">RAM ${fmtBytes(h.mem_used || 0)} / ${fmtBytes(h.mem_total || 0)} (${memPct}%)</b></span>`;
   }).join(" ");

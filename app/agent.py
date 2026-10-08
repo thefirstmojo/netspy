@@ -207,8 +207,9 @@ class Sampler:
         # CPU/RAM pro Prozess (/proc/stat + /proc/<pid>/stat)
         self._cpu_tot_prev: tuple | None = None  # (cpu_total, cpu_idle) kumulativ
         self._cpu_prev: dict = {}    # pid -> utime+stime kumulativ
-        self._sys_ema: dict = {}     # name -> CPU% (geglättet)
-        self._sys_active: dict = {}  # name -> monotonic timestamp
+        self._sys_ema: dict = {}     # pid -> CPU-Anteil (geglättet)
+        self._sys_active: dict = {}  # pid -> monotonic timestamp
+        self._ncpu: int = 0          # Threads des Hosts (Skala der Prozente)
         self._sys_ring: dict = {}    # pid -> deque(maxlen=10) rohe CPU-Werte
         self._host_ring = deque(maxlen=10)  # Host-CPU-Rolling (10 s)
         self._sys_cont: dict = {}    # name -> container (persistent, kein Flackern)
@@ -409,6 +410,10 @@ class Sampler:
         CPU: Differenz der /proc/stat-Zeiten (utime/stime bzw. Gesamt-CPU)
         ueber dt — wie bei den Netz/Disk-Zaehlern. RAM ist ein Zustand
         (kein Zaehler): MemAvailable/VmRSS direkt.
+
+        SKALA: Prozesswerte = Anteil an EINEM Kern (100 % = ein Kern voll
+        ausgelastet, wie top/htop/docker stats; kann >100 % werden). Der
+        Host-Wert bleibt die Gesamtauslastung ueber ALLE Kerne (0-100 %).
         """
         # --- Host-CPU aus /proc/stat ---
         cpu_total = cpu_idle = 0.0
@@ -422,6 +427,15 @@ class Sampler:
                         break
         except OSError:
             pass
+        # Threads des Hosts (fuer die Prozess-Skala): /proc/stat listet je Kern
+        # eine "cpuN"-Zeile. Einmal ermitteln, dann gecacht.
+        if not self._ncpu:
+            try:
+                with open(f"{PROC}/stat") as f:
+                    self._ncpu = sum(1 for l in f
+                                     if l.startswith("cpu") and l[3:4].isdigit()) or 1
+            except OSError:
+                self._ncpu = os.cpu_count() or 1
         cpu_pct = 0.0
         # t_d = CPU-Zuwachs ALLER Kerne in diesem Tick — wird auch von der
         # Prozess-Schleife unten benoetigt, daher VOR dem _cpu_tot_prev-Update
@@ -500,26 +514,29 @@ class Sampler:
         sys_emitted = {}
         for pid, (cpu_raw, cpu10, mem) in sys_raw.items():
             name = self.comm_for(pid)
-            key = name
-            old = self._sys_ema.get(key)
+            # EMA je PID (nicht je Name!): mehrere PIDs desselben Namens
+            # ueberschrieben sich sonst gegenseitig im Glaettungswert.
+            old = self._sys_ema.get(pid)
             cpu_s = EMA * cpu_raw + (1 - EMA) * old if old else cpu_raw
-            self._sys_ema[key] = cpu_s
-            self._sys_active[key] = mono
-            e = sys_emitted.setdefault(key, [0.0, 0.0, 0])
-            e[0] = max(e[0], cpu_s)
-            e[1] = max(e[1], cpu10)
+            self._sys_ema[pid] = cpu_s
+            self._sys_active[pid] = mono
+            e = sys_emitted.setdefault(name, [0.0, 0.0, 0])
+            # SUMME statt max: mehrere PIDs mit gleichem Namen (zwei
+            # ffmpeg-Worker, chromium/python-Vielfalt) zaehlen zusammen.
+            # max() zeigte nur den groessten davon -> halbierte Werte.
+            # cpu_scale: Anteil an EINEM Kern (wie top/htop/docker stats).
+            e[0] += cpu_s * self._ncpu
+            e[1] += cpu10 * self._ncpu
             e[2] += mem
             ns = self.netns_of(pid)
             if ns:
                 cname = self._containers.get(ns)
                 if cname:
-                    self._sys_cont.setdefault(key, cname)
-        for key in list(self._sys_ema):
-            if (mono - self._sys_active.get(key, 0.0)) >= DECAY_S:
-                del self._sys_ema[key]
-                self._sys_active.pop(key, None)
-                self._sys_cont.pop(key, None)
-                sys_emitted.pop(key, None)
+                    self._sys_cont.setdefault(name, cname)
+        for pid in list(self._sys_ema):
+            if (mono - self._sys_active.get(pid, 0.0)) >= DECAY_S:
+                del self._sys_ema[pid]
+                self._sys_active.pop(pid, None)
         sys_cont = {k: v for k, v in self._sys_cont.items() if k in sys_emitted}
 
         procs = [

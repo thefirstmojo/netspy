@@ -501,6 +501,41 @@ def test_agent_self_test():
         check("agent._self_test() passes", False, str(e))
 
 
+# ---------------------------------------------------------------------------
+# 8) CPU/RAM per process: same-name PIDs are SUMMED, scale = one core
+# ---------------------------------------------------------------------------
+def test_agent_sys_cpu_aggregation():
+    """Zwei PIDs mit gleichem comm-Namen muessen summiert werden (max() zeigte
+    nur den groessten -> halbierte Werte), und die Prozess-Prozente beziehen
+    sich auf EINEN Kern (100 % = ein Thread voll, wie top/htop/docker stats)."""
+    print("agent CPU per process (sum across same-name PIDs + one-core scale)")
+    import subprocess
+    burn = "import time\nt=time.time()\nwhile time.time()-t<40: pass"
+    procs = [subprocess.Popen([sys.executable, "-c", burn],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+             for _ in range(2)]
+    try:
+        s = agent.Sampler()
+        s._sys_tick(time.monotonic(), 1.0)          # Baseline (no deltas yet)
+        time.sleep(6.0)
+        out = s._sys_tick(time.monotonic() + 6.0, 6.0)
+        check("host thread count detected", s._ncpu >= 2, s._ncpu)
+        rows = [pr for pr in out["procs"] if pr["name"].startswith("python")]
+        row = rows[0] if rows else None
+        check("row for the burner processes exists", row is not None,
+              [pr["name"] for pr in out["procs"][:3]])
+        cpu = row["cpu"] if row else 0.0
+        # zwei Burner je ~1 Kern -> ~200 %; mit max() waeren es ~100 %
+        check("same-name PIDs are summed, not maxed (2 threads ~200 %)", 
+              130.0 <= cpu <= 400.0, cpu)
+        check("host cpu keeps the all-cores scale (0-100)",
+              0.0 <= out["cpu"] <= 100.0, out["cpu"])
+    finally:
+        for pr in procs:
+            pr.kill()
+            pr.wait(timeout=5)
+
+
 def main() -> int:
     for fn in (test_dashboard_without_history,
                test_dashboard_history_shape,
@@ -519,7 +554,8 @@ def main() -> int:
                test_fetch_scheme_guard,
                test_terminal_manager,
                test_config_dir_helpers,
-               test_agent_self_test):
+               test_agent_self_test,
+               test_agent_sys_cpu_aggregation):
         fn()
     print()
     if FAILS:

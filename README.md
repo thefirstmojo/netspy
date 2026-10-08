@@ -28,7 +28,7 @@ Real-time monitoring of your servers in one dashboard: **per-interface, per-proc
 - EMA-smoothed, sortable by process / server / read / write
 
 ### ⚙️ CPU/RAM tab
-- CPU% and resident RAM per process, plus per-server host totals
+- CPU% per process as **share of one core** (100 % = one core fully used, 400 % = four threads — same convention as `top`/`htop`/`docker stats`) and resident RAM per process, plus per-server host totals (0–100 % across all cores)
 - Display mode switch: **live** (EMA) or **10 s rolling average** (⚡ / 📊 buttons)
 
 ### 💾 Storage tab
