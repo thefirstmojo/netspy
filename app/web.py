@@ -1237,18 +1237,32 @@ class TerminalManager:
         return ""
 
     # -- ttyd-Prozesse -------------------------------------------------------
+    @staticmethod
+    def _remote_cmd(name: str) -> str:
+        """Kommando, das per SSH auf dem Zielhost laeuft (persistente tmux-Session).
+
+        REIHENFOLGE IST ENTSCHEIDEND: "mouse" ist eine SERVER-Option. Steht der
+        tmux-Server noch nicht, verpufft ein "set -g mouse on" in einem Server,
+        der sich mangels Sessions sofort wieder beendet - die danach gestartete
+        Session lief mit mouse off. Dann haelt tmux die Ausgabe in seinem eigenen
+        Scrollback, das Mausrad scrollte nur die paar Zeilen im eigenen
+        xterm-Puffer ("scrollt nur die letzten Befehle"). Genau so war der Fix
+        aus v0.7.32 gebaut - am 09.10.2026 erneut gemeldet. Deshalb: Server +
+        Session ZUERST anlegen (idempotent, -d), danach die Option setzen.
+        -g setzt sie global, gilt also auch fuer bestehende Sessions und beim
+        Wiederverbinden (-A). Ohne tmux: normale Login-Shell.
+        """
+        safe = TerminalManager._safe_name(name)
+        return ("command -v tmux >/dev/null 2>&1 && { "
+                f"tmux new -d -s ns-{safe} 2>/dev/null; "
+                "tmux set -g mouse on 2>/dev/null; } ; "
+                f"tmux new -A -s ns-{safe} || exec bash -l")
+
     def _spawn(self, t: dict) -> subprocess.Popen:
         # Persistente Session: tmux auf dem Zielhost (falls vorhanden) — die
         # Verbindung ueberlebt Tab-Wechsel und Browser-Reloads. Ohne tmux:
         # normale Login-Shell. Passwort-Auth bleibt interaktiv (ssh -t).
-        safe = self._safe_name(t["name"])
-        # tmux mit aktivierter Maus: sonst haelt tmux die komplette Ausgabe in
-        # seinem eigenen Scrollback und das Mausrad scrolled nichts (xterm sieht
-        # nur die Viewport-Hoehe). "set -g mouse on" laesst das Rad den
-        # tmux-Scrollback scrollen. -g setzt die Option global + bestehende
-        # Sessions, daher greift es auch beim Wiederverbinden (-A).
-        remote = ("command -v tmux >/dev/null 2>&1 && tmux set -g mouse on 2>/dev/null; "
-                  f"tmux new -A -s ns-{safe} || exec bash -l")
+        remote = self._remote_cmd(t["name"])
         cmd = ["ttyd", "-p", str(t["port"]),
                # -W (--writable): OHNE dieses Flag startet ttyd read-only und
                # verwirft jede Eingabe ("Terminal nimmt nichts an")!

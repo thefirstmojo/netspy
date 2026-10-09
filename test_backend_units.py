@@ -424,6 +424,16 @@ def test_terminal_manager():
         check("key is NEVER returned to the API",
               "key" not in t0 and "BEGIN OPENSSH" not in json.dumps(st))
         check("first target port is base port", t0["port"] == TerminalManager.BASE_PORT)
+        # Regression v0.7.38: 'mouse' ist eine SERVER-Option - sie muss NACH dem
+        # Anlegen von Server+Session gesetzt werden, sonst startet die Session
+        # mit mouse off und das Mausrad scrollt nicht (Scrollback).
+        rc = tm._remote_cmd("A")
+        check("remote cmd: server/session created BEFORE 'set -g mouse on'",
+              rc.index("new -d -s") < rc.index("set -g mouse on"), rc)
+        check("remote cmd: reattaches the persistent session (-A)",
+              "new -A -s ns-A" in rc, rc)
+        check("remote cmd: falls back to a login shell without tmux",
+              rc.endswith("|| exec bash -l"), rc)
         keyfile = os.path.join(td, "ssh", "TRU")
         check("key file written", os.path.isfile(keyfile))
         check("key file mode 0600", oct(os.stat(keyfile).st_mode & 0o777) == "0o600")
