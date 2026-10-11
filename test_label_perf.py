@@ -20,23 +20,33 @@ from playwright.sync_api import sync_playwright
 STATIC = "/opt/data/netspy/app/static"
 T = time.time()
 SERVERS = ["Unraid", "TrueNAS"]
-TS = [T - 300 + i for i in range(300)]
-DASH = {
-    "version": "test", "servers": [{"name": n} for n in SERVERS],
-    "ifaces": [], "latency": {n: 5 for n in SERVERS}, "host_sys": {},
-    "disk": [], "system": [], "mem": {}, "cpu": {}, "table": [],
-    "series": {n: {"ts": TS, "rx": [i * 1.0 for i in range(300)],
-                   "tx": [i * 2.0 for i in range(300)]} for n in SERVERS},
-    "mem": {n: {"ts": TS, "used": [1000] * 300} for n in SERVERS},
-    "cpu": {n: {"ts": TS, "cpu": [10.0] * 300} for n in SERVERS},
-}
+N = 300
+# wanderndes Zeitfenster wie im echten Backend: pro Abruf ein Punkt mehr
+_tick = [0]
+
+
+def payload():
+    _tick[0] += 1
+    ts = [T - N + i + _tick[0] for i in range(N)]
+    return ts
+def dashboard():
+    ts = payload()
+    return {
+        "version": "test", "servers": [{"name": n} for n in SERVERS],
+        "ifaces": [], "latency": {n: 5 for n in SERVERS}, "host_sys": {},
+        "disk": [], "system": [], "table": [],
+        "series": {n: {"ts": ts, "rx": [i * 1.0 for i in range(N)],
+                       "tx": [i * 2.0 for i in range(N)]} for n in SERVERS},
+        "mem": {n: {"ts": ts, "used": [1000 + i for i in range(N)]} for n in SERVERS},
+        "cpu": {n: {"ts": ts, "cpu": [10.0] * N} for n in SERVERS},
+    }
 
 
 class H(SimpleHTTPRequestHandler):
     def do_GET(self):
         p = self.path.split("?")[0]
         if p == "/api/dashboard":
-            return self.j(DASH)
+            return self.j(dashboard())
         if p == "/api/storage":
             return self.j({"enabled": [], "available": {}, "recorded": {}, "host_access": {}})
         if p == "/api/settings":
@@ -96,13 +106,43 @@ with sync_playwright() as pw:
       return performance.now() - t0; }""")
     check(f"20.000 Aufrufe unter 300 ms (alte Variante: ~2.200 ms) - {ms:.0f} ms", ms < 300)
 
-    # 3) Die Charts nutzen die Labels wirklich (Ende-zu-Ende)
+    # 3) Inkrementelles Fuettern: die Array-OBJEKTE muessen identisch bleiben.
+    #    (Werden sie jede Sekunde ersetzt, parst Chart.js alle 300 Punkte neu -
+    #    genau das liess den Renderer-Speicher wachsen.)
+    pg.wait_for_timeout(2500)          # mindestens zwei Refresh-Ticks
+    ident = pg.evaluate("""() => {
+      const c = Chart.getChart(document.querySelector('canvas'));
+      if (!c) return null;
+      const ref = c.data.datasets[0].data;
+      const lbl = c.data.labels;
+      const before = {n: ref.length, last: lbl[lbl.length - 1], tail: ref[ref.length - 1],
+                      top: lbl[0], ptr: window.__ref};
+      window.__ref = ref;
+      return {same: window.__ref === ref, n: ref.length, last: lbl[lbl.length - 1],
+              head: lbl[0], tail: ref[ref.length - 1]};
+    }""")
+    pg.wait_for_timeout(2500)
+    ident2 = pg.evaluate("""() => {
+      const c = Chart.getChart(document.querySelector('canvas'));
+      const ref = c.data.datasets[0].data;
+      const lbl = c.data.labels;
+      return {same: ref === window.__ref, n: ref.length, last: lbl[lbl.length - 1],
+              head: lbl[0], tail: ref[ref.length - 1]};
+    }""")
+    check("Daten-Array bleibt dasselbe Objekt (inkrementell statt Neuaufbau)",
+          bool(ident2 and ident2["same"]), ident2)
+    check("Fenster wandert (neuester Punkt vorne/hinten mitgewandert)",
+          bool(ident2 and ident2["last"] != ident) and ident2["head"] != ident.get("head"),
+          {"vorher": ident, "nachher": ident2})
+    check("Fenster bleibt 300 Punkte lang", bool(ident2 and ident2["n"] == 300), ident2)
+
+    # 4) Die Charts nutzen die Labels wirklich (Ende-zu-Ende)
     labels = pg.evaluate("""() => { const c = Chart.getChart(document.querySelector('canvas'));
       return c && c.data.labels ? c.data.labels.slice(-3) : null; }""")
     check("Chart-Achse traegt HH:MM:SS-Labels",
           bool(labels) and all(len(v) == 8 and v[2] == ":" for v in labels), labels)
 
-    # 4) Keine JS-Fehler
+    # 5) Keine JS-Fehler
     check("Keine JS-Fehler", not errs, errs[:3])
     b.close()
 

@@ -72,6 +72,37 @@ function chartVisible(ch) {
   if (!_chVis.has(cv)) { obs.observe(cv); return true; }   // erst zeichnen, dann beobachten
   return _chVis.get(cv) !== false;
 }
+/* Daten INKREMENTELL fuettern statt die Arrays jede Sekunde zu ersetzen.
+   Chart.js parst bei einer neuen Array-Identitaet alle Punkte neu und baut die
+   Punkt-Elemente auf; bei 300 Punkten x ~10 Serien sind das ~13.500 Punkte pro
+   Sekunde. Gemessen wuchs der Renderer dadurch um 0,03-0,3 MB/s (Tabellen und
+   Canvas sind unschuldig: Charts neu aufbauen brachte nichts, kleine Nutzlast
+   drehte das Wachstum auf -0,047 MB/s). Bleiben die Arrays dieselben Objekte
+   und wandert nur der neue Punkt hinten dran, parst Chart.js nur diesen.
+   Rueckgabe true = musste komplett ersetzen (Erstaufbau/Luecke/Serienwechsel). */
+function feedChart(ch, labels, datasets) {
+  const cur = ch && ch.data;
+  const full = () => { ch.data.labels = labels; ch.data.datasets = datasets; return true; };
+  if (!cur || !Array.isArray(cur.labels) || !Array.isArray(labels) ||
+      cur.labels.length !== labels.length || cur.labels.length < 3 ||
+      !Array.isArray(cur.datasets) || cur.datasets.length !== datasets.length) return full();
+  // Wandert das Fenster um genau einen Punkt (Normalfall im Sekundentakt)?
+  if (cur.labels[cur.labels.length - 1] !== labels[labels.length - 2]) return full();
+  for (let i = 0; i < datasets.length; i++) {
+    const nd = datasets[i] && datasets[i].data, cd = cur.datasets[i] && cur.datasets[i].data;
+    if (!Array.isArray(nd) || !Array.isArray(cd) || cd.length !== nd.length) return full();
+  }
+  cur.labels.push(labels[labels.length - 1]); cur.labels.shift();
+  for (let i = 0; i < datasets.length; i++) {
+    const nd = datasets[i].data, cd = cur.datasets[i].data;
+    cd.push(nd[nd.length - 1]); cd.shift();
+    for (const k of ["hidden", "label", "borderColor", "backgroundColor"]) {
+      if (k in datasets[i] && cur.datasets[i][k] !== datasets[i][k]) cur.datasets[i][k] = datasets[i][k];
+    }
+  }
+  return false;
+}
+
 function chartUpdate(ch, mode) {
   if (ch && chartVisible(ch)) ch.update(mode || "none");
 }
@@ -282,9 +313,8 @@ function updateCharts(series) {
     const ch = state.charts[name];
     if (!ch) continue;
     const s = series[name] || { ts: [], rx: [], tx: [] };
-    ch.data.labels = s.ts.slice(-n).map(fmtTs);
-    ch.data.datasets[0].data = s.rx.slice(-n);
-    ch.data.datasets[1].data = s.tx.slice(-n);
+    feedChart(ch, s.ts.slice(-n).map(fmtTs),
+              [{ data: s.rx.slice(-n) }, { data: s.tx.slice(-n) }]);
     if (state.equalScale) {
       ch.options.scales.y.min = 0;
       ch.options.scales.y.max = ymax > 0 ? ymax * 1.15 : undefined;
@@ -387,9 +417,8 @@ function fetchDetailHistory(server, proc) {
   fetch(`/api/process_history?server=${encodeURIComponent(server)}&proc=${encodeURIComponent(proc)}`)
     .then(r => r.json())
     .then(d => {
-      ch.data.labels = (d.ts || []).map(fmtTs);
-      ch.data.datasets[0].data = d.rx || [];
-      ch.data.datasets[1].data = d.tx || [];
+      feedChart(ch, (d.ts || []).map(fmtTs),
+                [{ data: d.rx || [] }, { data: d.tx || [] }]);
       chartUpdate(ch);
     })
     .catch(() => {});
@@ -1122,8 +1151,7 @@ function updateMemChart(mem, servers) {
       },
     });
   } else {
-    memChart.data.labels = labelArr;
-    memChart.data.datasets = datasets;
+    feedChart(memChart, labelArr, datasets);
     memChart.options.scales.y.max = yMax;
     chartUpdate(memChart);
   }
@@ -1177,8 +1205,7 @@ function updateCpuChart(cpu, servers) {
       },
     });
   } else {
-    cpuChart.data.labels = labelArr;
-    cpuChart.data.datasets = datasets;
+    feedChart(cpuChart, labelArr, datasets);
     chartUpdate(cpuChart);
   }
 }
@@ -1190,8 +1217,8 @@ function updateLatency(latency) {
     const ch = state.latencyCharts && state.latencyCharts[sname];
     if (ch) {
       const L = latency[sname] || { ts: [], ms: [] };
-      ch.data.labels = (L.ts || []).map(fmtTs);
-      ch.data.datasets[0].data = (L.ms || []).map(v => (v < 0 ? null : v));
+      feedChart(ch, (L.ts || []).map(fmtTs),
+                [{ data: (L.ms || []).map(v => (v < 0 ? null : v)) }]);
       chartUpdate(ch);
     }
     const badge = document.getElementById("badge-" + esc(sname));
