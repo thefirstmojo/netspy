@@ -1239,7 +1239,20 @@ document.getElementById("ifaces").addEventListener("click", e => {
 });
 
 /* ---------- Hauptschleife ---------- */
+/* Hintergrund-Tab: nicht jede Sekunde neu zeichnen. Das Neuzeichnen der
+   Tabellen (Prozess-/Disk-/CPU-Tabelle, zusammen ~300 Zeilen) erzeugt pro
+   Sekunde 2-3k DOM-Knoten Muell. Chrome holt den in einem versteckten Tab nur
+   traege ab (GC-Drosselung) -> gemessen wuchsen 37.752 tote Knoten / ~77 MB
+   an, bis eine GC sie einsammelte. Sichtbare Tabs sind nicht betroffen; wird
+   der Tab wieder sichtbar, rendert 'visibilitychange' sofort vollstaendig
+   nach (die Chart-Historie kommt ohnehin vom Server). */
+const HIDDEN_REFRESH_MS = 5000;
+let _lastRefresh = 0;
+
 async function refresh() {
+  const now = Date.now();
+  if (document.hidden && now - _lastRefresh < HIDDEN_REFRESH_MS) return;
+  _lastRefresh = now;
   let d;
   try {
     d = await (await fetch("/api/dashboard")).json();
@@ -1581,6 +1594,9 @@ refresh();
 loadProchistory();
 loadStorage();
 setInterval(refresh, 1000);
+/* Tab kommt aus dem Hintergrund: sofort aktualisieren, statt bis zu 5 s auf
+   den naechsten regulären Poll zu warten */
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
 setInterval(() => {
   // Storage-Daten alle 60 s aktualisieren (Füllstände ändern sich langsam)
   if (Date.now() - lastStorageLoad > 60000) { lastStorageLoad = Date.now(); loadStorage(); }
