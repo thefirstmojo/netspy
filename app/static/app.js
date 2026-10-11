@@ -48,6 +48,34 @@ function fmtTs(ts) {
   return v;
 }
 
+/* Nur SICHTBARE Charts neu zeichnen. Jedes update() eines Charts mit 300 Punkten
+   erzeugt im Renderer Raster-/Skia-Speicher; im offenen Tab gemessen:
+   Charts an = +62 MB/100 s, Charts aus = -68 MB/100 s (Tabellen dabei egal).
+   Die Seite ist lang, im Blickfeld sind aber nur 1-3 Charts - der Rest kostete
+   Speicher und CPU ohne Nutzen. Die Daten werden weiter gepflegt, nur das
+   Zeichnen entfaellt; wird ein Chart sichtbar, zeichnet der naechste Tick es
+   mit den aktuellen Daten. */
+const _chVis = new Map();
+let _chObs = null;
+function _chObserver() {
+  if (_chObs || typeof IntersectionObserver === "undefined") return _chObs;
+  _chObs = new IntersectionObserver(entries => {
+    for (const e of entries) _chVis.set(e.target, e.isIntersecting);
+  }, { rootMargin: "150px" });
+  return _chObs;
+}
+function chartVisible(ch) {
+  const cv = ch && ch.canvas;
+  if (!cv) return true;
+  const obs = _chObserver();
+  if (!obs) return true;                                  // kein Observer: wie bisher
+  if (!_chVis.has(cv)) { obs.observe(cv); return true; }   // erst zeichnen, dann beobachten
+  return _chVis.get(cv) !== false;
+}
+function chartUpdate(ch, mode) {
+  if (ch && chartVisible(ch)) ch.update(mode || "none");
+}
+
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -264,7 +292,7 @@ function updateCharts(series) {
       delete ch.options.scales.y.min;
       delete ch.options.scales.y.max;
     }
-    ch.update("none");
+    chartUpdate(ch);
   }
 }
 
@@ -362,7 +390,7 @@ function fetchDetailHistory(server, proc) {
       ch.data.labels = (d.ts || []).map(fmtTs);
       ch.data.datasets[0].data = d.rx || [];
       ch.data.datasets[1].data = d.tx || [];
-      ch.update("none");
+      chartUpdate(ch);
     })
     .catch(() => {});
 }
@@ -510,7 +538,7 @@ function applyDetailScale() {
       delete ch.options.scales.y.min;
       delete ch.options.scales.y.max;
     }
-    ch.update("none");
+    chartUpdate(ch);
   }
 }
 
@@ -1097,7 +1125,7 @@ function updateMemChart(mem, servers) {
     memChart.data.labels = labelArr;
     memChart.data.datasets = datasets;
     memChart.options.scales.y.max = yMax;
-    memChart.update("none");
+    chartUpdate(memChart);
   }
 }
 
@@ -1151,7 +1179,7 @@ function updateCpuChart(cpu, servers) {
   } else {
     cpuChart.data.labels = labelArr;
     cpuChart.data.datasets = datasets;
-    cpuChart.update("none");
+    chartUpdate(cpuChart);
   }
 }
 
@@ -1164,7 +1192,7 @@ function updateLatency(latency) {
       const L = latency[sname] || { ts: [], ms: [] };
       ch.data.labels = (L.ts || []).map(fmtTs);
       ch.data.datasets[0].data = (L.ms || []).map(v => (v < 0 ? null : v));
-      ch.update("none");
+      chartUpdate(ch);
     }
     const badge = document.getElementById("badge-" + esc(sname));
     if (!badge) continue;
