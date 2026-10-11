@@ -143,9 +143,10 @@ python3 app/agent.py --selftest # parser fixtures (ss / route table)
 ```
 
 DOM tests render the real `app/static` in Chromium (Playwright) and check the
-terminal tab, the command list tooltip, the filter chips and the resize/auto-scroll
-behaviour — run each script directly: `python3 test_cmdlist.py`,
-`test_filter_audit.py`, `test_resize_autoscroll.py`, `test_terminal_suggested.py`.
+terminal tab, the command list tooltip, the filter chips, the resize/auto-scroll
+behaviour and the chart time labels — run each script directly: `python3 test_cmdlist.py`,
+`test_filter_audit.py`, `test_resize_autoscroll.py`, `test_terminal_suggested.py`,
+`test_label_perf.py`.
 
 ## Planned
 

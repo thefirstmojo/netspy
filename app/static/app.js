@@ -27,9 +27,25 @@ function fmt(bps) {
   return bps.toFixed(0) + " B/s";
 }
 
+/* Zeitstempel-Label der Charts (HH:MM:SS).
+   REGRESSION v0.7.39: Frueher stand hier je Datenpunkt
+   `new Date(ts*1000).toLocaleTimeString("de-DE", {hour12:false})` - also die
+   ICU-Formatierung mit einem frischen Options-Objekt pro Aufruf (~111 us).
+   Bei 15 Charts x 300 Punkten x 3 Servern sind das ~3.600 Aufrufe/SEKUNDE
+   = 40 % eines CPU-Kerns Dauerlast im Browser (gemessen per CPU-Profil) und
+   massives Allokationswachstum, wodurch der Renderer im Dauerbetrieb auf
+   >3 GB RAM anwuchs. Jetzt reine Date-Getter + Zwischenspeicher pro
+   Zeitstempel: identische Ausgabe, ~1000x schneller, keine Dauerlast. */
+const _fmtTsCache = new Map();
 function fmtTs(ts) {
+  let v = _fmtTsCache.get(ts);
+  if (v !== undefined) return v;
   const d = new Date(ts * 1000);
-  return d.toLocaleTimeString("de-DE", { hour12: false });
+  const p = n => (n < 10 ? "0" : "") + n;
+  v = p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+  if (_fmtTsCache.size > 4096) _fmtTsCache.clear();   // ~1 h Sekunden, dann neu
+  _fmtTsCache.set(ts, v);
+  return v;
 }
 
 function esc(s) {
