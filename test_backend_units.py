@@ -546,6 +546,26 @@ def test_agent_sys_cpu_aggregation():
             pr.wait(timeout=5)
 
 
+
+# ---------------------------------------------------------------------------
+# 9) Kernel-comm ist auf 15 Zeichen begrenzt (smbd-Kinder)
+# ---------------------------------------------------------------------------
+def test_smbd_comm_completion():
+    print("agent comm: truncated smbd names completed from the socket")
+    s = agent.Sampler()
+    s._prev_ss = {111: {"pid": 4242, "raddr": "192.168.2.100"}}
+    name, ok = s._comm_complete(4242, "smbd[192.168.2.")
+    check("truncated smbd name gets the full client IP from the socket",
+          name == "smbd[192.168.2.100]" and ok is True, name)
+    name2, ok2 = s._comm_complete(9999, "smbd[192.168.2.")
+    check("without a known socket the truncated name stays (and is retried)",
+          name2 == "smbd[192.168.2." and ok2 is False, name2)
+    name3, ok3 = s._comm_complete(4242, "nginx")
+    check("complete names stay untouched", name3 == "nginx" and ok3 is True, name3)
+    name4, ok4 = s._comm_complete(4242, "smbd")
+    check("bare 'smbd' is not rewritten here (network path does that)",
+          name4 == "smbd", name4)
+
 def main() -> int:
     for fn in (test_dashboard_without_history,
                test_dashboard_history_shape,
@@ -565,7 +585,8 @@ def main() -> int:
                test_terminal_manager,
                test_config_dir_helpers,
                test_agent_self_test,
-               test_agent_sys_cpu_aggregation):
+               test_agent_sys_cpu_aggregation,
+               test_smbd_comm_completion):
         fn()
     print()
     if FAILS:

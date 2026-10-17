@@ -217,13 +217,32 @@ class Sampler:
     # ------------------------------------------------------------------
     # Hilfen
     # ------------------------------------------------------------------
+    def _comm_complete(self, pid: int, name: str) -> tuple:
+        """Kernel-comm vervollstaendigen, wenn sie abgeschnitten ist.
+
+        /proc/<pid>/comm ist auf 15 Zeichen begrenzt: smbd-Kinder heissen dort
+        "smbd[192.168.2." - die volle Client-IP kennt nur der Socket des
+        Prozesses. Rueckgabe: (name, vollstaendig?)
+        """
+        if name.startswith("smbd[") and "]" not in name:
+            for s in (self._prev_ss or {}).values():
+                if s.get("pid") == pid and s.get("raddr"):
+                    return f"smbd[{s['raddr']}]", True
+            return name, False
+        return name, True
+
     def comm_for(self, pid: int) -> str:
         if pid not in self._comm:
             try:
                 with open(f"{PROC}/{pid}/comm") as f:
-                    self._comm[pid] = f.read().strip()[:40] or f"pid{pid}"
+                    name = f.read().strip()[:40] or f"pid{pid}"
             except OSError:
-                self._comm[pid] = f"pid{pid}"
+                name = f"pid{pid}"
+            name, complete = self._comm_complete(pid, name)
+            if complete:                      # unvollstaendige Namen nicht cachen
+                self._comm[pid] = name        # -> naechster Tick versucht es erneut
+            else:
+                return name
         return self._comm[pid]
 
     def netns_of(self, pid: int) -> int:
@@ -793,7 +812,9 @@ class Sampler:
                 # SMB-Sessions: smbd pro Client-IP ausweisen (Remote-Adresse des
                 # Sockets = SMB-Client). So sieht man, welcher Client gerade wie
                 # viel ueber SMB laedt (statt nur "smbd" aggregiert).
-                if name == "smbd" and s.get("raddr"):
+                # smbd-Kinder heissen im Kernel "smbd[192.168.2." (15-Zeichen-
+                # Grenze) - auch sie bekommen die volle Client-IP aus dem Socket.
+                if (name == "smbd" or name.startswith("smbd[")) and s.get("raddr"):
                     name = f"smbd[{s['raddr']}]"
                 e = raw.setdefault(name, [0.0, 0.0])
                 e[0] += drx
@@ -818,7 +839,7 @@ class Sampler:
                         cname = self._port_containers.get(port) if port else None
                         if cname:
                             nm = f"docker-proxy:{port}"
-                    elif nm == "smbd" and s2.get("raddr"):
+                    elif (nm == "smbd" or nm.startswith("smbd[")) and s2.get("raddr"):
                         nm = f"smbd[{s2['raddr']}]"
                     conn_counts[nm] = conn_counts.get(nm, 0) + 1
 
