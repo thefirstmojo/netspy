@@ -136,6 +136,35 @@ with sync_playwright() as pw:
           {"vorher": ident, "nachher": ident2})
     check("Fenster bleibt 300 Punkte lang", bool(ident2 and ident2["n"] == 300), ident2)
 
+    # 4) Design der Datasets bleibt erhalten. Regression v0.7.42: feedChart()
+    #    hatte die Dataset-Objekte durch {data}-Huellen ersetzt -> Chart.js
+    #    zeichnete mit Standardfarben und Punkt-Kreisen statt der NetSpy-Optik.
+    style = pg.evaluate("""() => { const c = Chart.getChart(document.querySelector('canvas'));
+      return (c.data.datasets || []).map(x => ({label: x.label, pointRadius: x.pointRadius,
+        fill: x.fill, borderColor: x.borderColor, borderWidth: x.borderWidth})); }""")
+    check("Dataset-Design bleibt erhalten (pointRadius 0, fill, Farben)",
+          bool(style) and all(s.get("pointRadius") == 0 and s.get("fill") is True and s.get("borderColor")
+                              for s in style), style)
+    check("Dataset-Labels bleiben (in/out)",
+          [s.get("label") for s in style] == ["in", "out"], style)
+
+    # 5) Chart-Tooltip beim Hover. Regression: showTip() war doppelt deklariert
+    #    (Chart + Befehlsliste), die spaetere Deklaration gewann - der Chart-Hover
+    #    lief in die Befehlslisten-Funktion und zeigte kein Fenster.
+    cv = pg.locator("canvas").first
+    cv.scroll_into_view_if_needed()
+    box = cv.bounding_box()
+    pg.mouse.move(box["x"] + box["width"] * 0.6, box["y"] + box["height"] * 0.5)
+    pg.wait_for_timeout(350)
+    tip = pg.evaluate("""() => { const t = document.getElementById('proctip');
+      return t ? {disp: getComputedStyle(t).display, txt: (t.textContent || '').slice(0, 80)} : null; }""")
+    check("Hover zeigt das Chart-Tooltip", bool(tip) and tip["disp"] != "none", tip)
+    check("Tooltip enthaelt in/out-Werte", bool(tip) and "in" in (tip.get("txt") or ""), tip)
+    pg.mouse.move(4, 4)
+    pg.wait_for_timeout(250)
+    disp = pg.evaluate("() => { const t = document.getElementById('proctip'); return t ? getComputedStyle(t).display : null; }")
+    check("Verlassen blendet das Tooltip aus", disp in (None, "none"), disp)
+
     # 4) Die Charts nutzen die Labels wirklich (Ende-zu-Ende)
     labels = pg.evaluate("""() => { const c = Chart.getChart(document.querySelector('canvas'));
       return c && c.data.labels ? c.data.labels.slice(-3) : null; }""")

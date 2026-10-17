@@ -82,7 +82,21 @@ function chartVisible(ch) {
    Rueckgabe true = musste komplett ersetzen (Erstaufbau/Luecke/Serienwechsel). */
 function feedChart(ch, labels, datasets) {
   const cur = ch && ch.data;
-  const full = () => { ch.data.labels = labels; ch.data.datasets = datasets; return true; };
+  /* Voll-Update: Dataset-Objekte NUR ersetzen, wenn die neuen ihr Design
+     mitbringen. Sonst wuerden Farben/fill/pointRadius verloren gehen und
+     Chart.js zeichnet mit Standardfarben und Punkt-Kreisen (Regression
+     v0.7.42) - dann werden nur die Daten getauscht. */
+  const full = () => {
+    ch.data.labels = labels;
+    const old = ch.data.datasets;
+    const hasStyle = d => d && ("borderColor" in d || "pointRadius" in d || "fill" in d);
+    if (Array.isArray(old) && old.length === datasets.length && !datasets.every(hasStyle)) {
+      for (let i = 0; i < datasets.length; i++) old[i].data = datasets[i].data;
+    } else {
+      ch.data.datasets = datasets;
+    }
+    return true;
+  };
   if (!cur || !Array.isArray(cur.labels) || !Array.isArray(labels) ||
       cur.labels.length !== labels.length || cur.labels.length < 3 ||
       !Array.isArray(cur.datasets) || cur.datasets.length !== datasets.length) return full();
@@ -99,6 +113,32 @@ function feedChart(ch, labels, datasets) {
     for (const k of ["hidden", "label", "borderColor", "backgroundColor"]) {
       if (k in datasets[i] && cur.datasets[i][k] !== datasets[i][k]) cur.datasets[i][k] = datasets[i][k];
     }
+  }
+  return false;
+}
+
+/* Fuer Charts, deren Dataset-Objekte schon mit ihrem Design existieren
+   (Netzwerk-, Latenz- und Detail-Charts): hier werden ausschliesslich die
+   DATEN getauscht, nie die Objekte. Gleiche Inkrement-Logik wie feedChart. */
+function feedSeries(ch, labels, arrays) {
+  const cur = ch && ch.data;
+  const full = () => {
+    ch.data.labels = labels;
+    for (let i = 0; i < arrays.length && ch.data.datasets[i]; i++) ch.data.datasets[i].data = arrays[i];
+    return true;
+  };
+  if (!cur || !Array.isArray(cur.labels) || !Array.isArray(labels) ||
+      cur.labels.length !== labels.length || cur.labels.length < 3 ||
+      !Array.isArray(cur.datasets) || cur.datasets.length < arrays.length) return full();
+  if (cur.labels[cur.labels.length - 1] !== labels[labels.length - 2]) return full();
+  for (let i = 0; i < arrays.length; i++) {
+    const cd = cur.datasets[i] && cur.datasets[i].data;
+    if (!Array.isArray(cd) || !Array.isArray(arrays[i]) || cd.length !== arrays[i].length) return full();
+  }
+  cur.labels.push(labels[labels.length - 1]); cur.labels.shift();
+  for (let i = 0; i < arrays.length; i++) {
+    const cd = cur.datasets[i].data;
+    cd.push(arrays[i][arrays[i].length - 1]); cd.shift();
   }
   return false;
 }
@@ -139,7 +179,11 @@ function hideTip() {
   frozenTip = null;
 }
 
-function showTip(cx, cy, label, rx, tx, snap) {
+/* Chart-Tooltip (Netzwerk-/Latenz-/Detail-Charts). Hiess frueher showTip und
+   kollidierte mit dem gleichnamigen Tooltip der Befehlsliste: die spaetere
+   Deklaration gewann, der Chart-Hover lief in die falsche Funktion (kein
+   Hover-Fenster). Jetzt eindeutig showChartTip / showCmdTip. */
+function showChartTip(cx, cy, label, rx, tx, snap) {
   const el = ensureTipEl();
   let html =
     `<div style="color:#94a3b8;margin-bottom:4px">${esc(label)}</div>` +
@@ -286,7 +330,7 @@ function buildCharts(servers) {
         snap = findSnap(s.name, ts);
       }
       frozenTip = { server: s.name };
-      showTip(e.clientX, e.clientY, ts != null ? fmtTs(ts) : "",
+      showChartTip(e.clientX, e.clientY, ts != null ? fmtTs(ts) : "",
         ch.data.datasets[0].data[idx] || 0,
         ch.data.datasets[1].data[idx] || 0, snap);
     });
@@ -313,8 +357,7 @@ function updateCharts(series) {
     const ch = state.charts[name];
     if (!ch) continue;
     const s = series[name] || { ts: [], rx: [], tx: [] };
-    feedChart(ch, s.ts.slice(-n).map(fmtTs),
-              [{ data: s.rx.slice(-n) }, { data: s.tx.slice(-n) }]);
+    feedSeries(ch, s.ts.slice(-n).map(fmtTs), [s.rx.slice(-n), s.tx.slice(-n)]);
     if (state.equalScale) {
       ch.options.scales.y.min = 0;
       ch.options.scales.y.max = ymax > 0 ? ymax * 1.15 : undefined;
@@ -399,7 +442,7 @@ function renderDetailCharts() {
         const x = e.offsetX !== undefined ? e.offsetX : e.clientX - rect.left;
         const idx = chartIndexAt(ch, x);
         if (idx == null) { hideTip(); return; }
-        showTip(e.clientX, e.clientY, ch.data.labels[idx] || "",
+        showChartTip(e.clientX, e.clientY, ch.data.labels[idx] || "",
           ch.data.datasets[0].data[idx] || 0,
           ch.data.datasets[1].data[idx] || 0, null);
       });
@@ -417,8 +460,7 @@ function fetchDetailHistory(server, proc) {
   fetch(`/api/process_history?server=${encodeURIComponent(server)}&proc=${encodeURIComponent(proc)}`)
     .then(r => r.json())
     .then(d => {
-      feedChart(ch, (d.ts || []).map(fmtTs),
-                [{ data: d.rx || [] }, { data: d.tx || [] }]);
+      feedSeries(ch, (d.ts || []).map(fmtTs), [d.rx || [], d.tx || []]);
       chartUpdate(ch);
     })
     .catch(() => {});
@@ -1217,8 +1259,7 @@ function updateLatency(latency) {
     const ch = state.latencyCharts && state.latencyCharts[sname];
     if (ch) {
       const L = latency[sname] || { ts: [], ms: [] };
-      feedChart(ch, (L.ts || []).map(fmtTs),
-                [{ data: (L.ms || []).map(v => (v < 0 ? null : v)) }]);
+      feedSeries(ch, (L.ts || []).map(fmtTs), [(L.ms || []).map(v => (v < 0 ? null : v))]);
       chartUpdate(ch);
     }
     const badge = document.getElementById("badge-" + esc(sname));
@@ -1858,7 +1899,7 @@ function positionTip(x, y) {
   tip.style.top = py + "px";
 }
 
-function showTip(row, x, y) {
+function showCmdTip(row, x, y) {
   tipRowEl = row;
   tipX = x; tipY = y;
   hideCmdTip();   // Zeilenwechsel: alter Tooltip sofort weg
@@ -1891,7 +1932,7 @@ function bindCmdTip() {
   // das Neu-Rendern der Liste (Favoriten-Toggle) ohne Re-Bind.
   box.addEventListener("mouseover", e => {
     const row = e.target && e.target.closest ? e.target.closest(".cmditem") : null;
-    if (row && row !== tipRowEl) showTip(row, e.clientX, e.clientY);
+    if (row && row !== tipRowEl) showCmdTip(row, e.clientX, e.clientY);
   });
   box.addEventListener("mouseout", e => {
     const from = e.target && e.target.closest ? e.target.closest(".cmditem") : null;
@@ -1915,7 +1956,7 @@ function bindCmdTip() {
     if (!tipRowEl && tipShowTimer === null && tipHideTimer === null) return;
     const row = baseRowAt(e.clientX, e.clientY);
     if (!row) { cancelTip(); hideCmdTip(); }
-    else if (row !== tipRowEl) showTip(row, e.clientX, e.clientY);
+    else if (row !== tipRowEl) showCmdTip(row, e.clientX, e.clientY);
   }, { capture: true, passive: true });
   // Sicherheitsnetze: Liste verlassen, Fenster verlassen, scrollen, blur/tab
   box.addEventListener("mouseleave", () => { cancelTip(); hideCmdTip(); });
