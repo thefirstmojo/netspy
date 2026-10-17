@@ -566,6 +566,31 @@ def test_smbd_comm_completion():
     check("bare 'smbd' is not rewritten here (network path does that)",
           name4 == "smbd", name4)
 
+
+# ---------------------------------------------------------------------------
+# 10) ss-Parser: Sockets ohne users:-Angabe duerfen keine Zaehler erben
+# ---------------------------------------------------------------------------
+def test_parse_ss_userless_socket():
+    print("agent parse_ss: sockets without users info do not poison neighbours")
+    sample = (
+        "ESTAB 0 0 192.168.2.101:1883 172.17.0.15:39474 "
+        'users:(("docker-proxy",pid=4242,fd=3)) ino:1111 sk:aa\n'
+        "\t ts sack bbr wscale:9,9 rto:201 bytes_sent:1000 bytes_retrans:0 "
+        "bytes_acked:900 bytes_received:800 cwnd:10\n"
+        "ESTAB 0 0 192.168.2.101:6379 172.17.0.5:39908 ino:2222 sk:bb\n"
+        "\t ts sack bbr wscale:9,9 rto:201 bytes_sent:999999999 "
+        "bytes_acked:999999998 bytes_received:999999997 cwnd:10\n"
+    )
+    res = agent.parse_ss(sample)
+    check("socket with users info keeps its own counters",
+          res.get(1111, {}).get("rx") == 800 and res.get(1111, {}).get("tx") == 900,
+          str(res.get(1111)))
+    check("socket without users info is ignored (no entry, pid unknown)",
+          2222 not in res, str(sorted(res)))
+    check("no socket inherits the 1e9 counters of the foreign block",
+          all(v.get("rx", 0) < 10 ** 9 and v.get("tx", 0) < 10 ** 9 for v in res.values()),
+          str({k: (v.get("rx"), v.get("tx")) for k, v in res.items()}))
+
 def main() -> int:
     for fn in (test_dashboard_without_history,
                test_dashboard_history_shape,
@@ -586,7 +611,8 @@ def main() -> int:
                test_config_dir_helpers,
                test_agent_self_test,
                test_agent_sys_cpu_aggregation,
-               test_smbd_comm_completion):
+               test_smbd_comm_completion,
+               test_parse_ss_userless_socket):
         fn()
     print()
     if FAILS:

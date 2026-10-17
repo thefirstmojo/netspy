@@ -93,10 +93,15 @@ def parse_ss(output: str) -> dict:
     res: dict = {}
     cur: int | None = None
     for line in output.splitlines():
-        m = _SS_USERS_RE.search(line)
-        if m:
-            ino_m = _SS_INO_RE.search(line)
-            if not ino_m:
+        # Jede nicht eingerueckte Zeile beginnt einen neuen Socket-Block.
+        # Sockets OHNE users:-Angabe (fremder PID-Namespace, fehlende Rechte)
+        # haben keinen Bezug -> cur bleibt None. Ohne dieses Zuruecksetzen
+        # schrieben ihre Byte-Zaehler auf den VORHERIGEN Socket und liessen
+        # dessen Raten auf Terabyte-Werte springen (z. B. docker-proxy:1883).
+        if line and line[0] not in " \t":
+            m = _SS_USERS_RE.search(line)
+            ino_m = _SS_INO_RE.search(line) if m else None
+            if not (m and ino_m):
                 cur = None
                 continue
             cur = int(ino_m.group(1))
