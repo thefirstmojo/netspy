@@ -38,6 +38,7 @@ Real-time monitoring of your servers in one dashboard: **per-interface, per-proc
 
 ### 🛠️ Settings page
 - Add/remove servers in the UI — stored as human-editable `servers.yaml`
+- The read-only MCP endpoint has its own on/off toggle and token field on the same page (`settings.yaml`)
 - `SERVERS` env entries stay in the env: each row is marked with its origin (env/config) and saving writes only the config rows (edit an env row to move it to the config)
 - Works without a volume too (env fallback); the UI explains what to mount
 
@@ -52,7 +53,8 @@ Real-time monitoring of your servers in one dashboard: **per-interface, per-proc
 
 ### 🤖 MCP interface (read-only, optional, v0.7.46+)
 - AI assistants can query NetSpy directly: `POST /mcp` on port **8092**, JSON-RPC 2.0 over HTTP (Streamable HTTP, plain JSON answers)
-- **Off by default:** while `MCP_TOKEN` is empty the listener is not started at all. Set the variable in the container env and recreate — every request sends it as `X-MCP-Token` (or `Authorization: Bearer …`)
+- **Switchable in the UI:** Settings tab → **🔌 MCP endpoint** → `enabled` toggle. Off means the port is not bound at all — a running listener stops immediately, no container restart needed. Default: on as soon as a token exists
+- **Token from two places (env or file):** `MCP_TOKEN` in the container env **or** the token field on the same settings page, stored in `settings.yaml` (written `0666` like `servers.yaml`, plain text — the token is never sent back to the browser). Env wins over the file; while no token is configured the listener stays off. Every request sends it as `X-MCP-Token` (or `Authorization: Bearer …`)
 - Eight **read-only** tools: `netspy_overview`, `netspy_agent_health`, `netspy_processes`, `netspy_peers`, `netspy_containers`, `netspy_interfaces`, `netspy_storage`, `netspy_history`
 - What they **cannot** do: change settings, start/stop containers, run commands, type into the SSH terminals. The module has no write path
 - Uptime check: `GET /mcp/health` (no token, no data — version and tool count only)
@@ -98,12 +100,12 @@ All values live directly in `docker-compose.yml` — no `.env` file.
 | `TZ` | `UTC` | Container timezone, e.g. `Europe/Berlin` (v0.7.35+, `tzdata` ships in the image). Decides when the storage history closes its day and month (local midnight instead of 02:00 with UTC) and the zone of all timestamps. Without `tzdata` the variable would be silently ignored — hence it is part of the image |
 | `WEB_PORT` / `AGENT_PORT` | `8090` / `8091` | Host ports (host networking — the values ARE the external ports) |
 | `AGENT_TOKEN` | empty | Shared `X-Agent-Token` header — **must match on all hosts** |
-| `MCP_TOKEN` | empty | **Optional read-only MCP interface** (v0.7.46+). The listener is not started while this is empty; requests send it as `X-MCP-Token` |
+| `MCP_TOKEN` | empty | **Optional read-only MCP interface** (v0.7.46+). Can also be set on the settings page (`settings.yaml`, v0.7.47+); the env value wins. Without a token the listener is not started; requests send it as `X-MCP-Token` |
 | `MCP_PORT` | `8092` | Host port of the MCP endpoint (`POST /mcp`, host networking — the value IS the external port) |
 | `TTYD_USER` | empty | **Terminal tab login — username** (v0.7.12+). Container env var only — never stored in NetSpy, no settings-page option. Set both `TTYD_USER` + `TTYD_PASS` → the Terminal tab shows a login form and unlocks with these credentials |
 | `TTYD_PASS` | empty | **Terminal tab login — password** (v0.7.12+). Container env var only — never stored in NetSpy. Both empty (`TTYD_USER` + `TTYD_PASS`) → terminals stay disabled (tab shows a hint); the rest of the dashboard stays open |
 | `DOCKER_SOCK` | `/var/run/docker.sock` (web) | Docker socket for per-container rows; `""` disables |
-| `CONFIG_DIR` | auto-detected | Volume for `servers.yaml` — `/netspy` mount → `/netspy/config` |
+| `CONFIG_DIR` | auto-detected | Volume for `servers.yaml` + `settings.yaml` — `/netspy` mount → `/netspy/config` |
 
 Plus two commented blocks in the compose, enabled per host: **AppArmor** (`security_opt: [apparmor:unconfined]`, hosts that enforce it) and the **Docker socket** volume.
 
@@ -128,7 +130,7 @@ The **web instance polls every agent once per second**; agents never initiate co
 
 ### Config volume — make it writable
 
-The settings page writes `servers.yaml` into the mounted volume. As root **without** `CAP_DAC_OVERRIDE`, the container can only write into world-writable directories — so make the mounted base directory world-writable once (the container creates subfolders `0777` and files `0666` itself, so you can still edit them):
+The settings page writes `servers.yaml` (server list) and `settings.yaml` (MCP toggle + token) into the mounted volume. As root **without** `CAP_DAC_OVERRIDE`, the container can only write into world-writable directories — so make the mounted base directory world-writable once (the container creates subfolders `0777` and files `0666` itself, so you can still edit them):
 
 ```bash
 chmod 777 /mnt/user/appdata/netspy      # Unraid

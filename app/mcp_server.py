@@ -649,12 +649,77 @@ class McpHandler(BaseHTTPRequestHandler):
 
 def start_mcp(monitor, port: int = DEFAULT_PORT, token: str = "") -> ThreadingHTTPServer | None:
     """Start the read-only MCP listener. Returns None when no token is configured."""
-    if not token:
-        print("[mcp] disabled - set MCP_TOKEN to enable the read-only MCP interface")
-        return None
-    server = McpServer(("0.0.0.0", port), McpHandler)
-    server.monitor = monitor
-    server.mcp_token = token
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    print(f"[mcp] read-only MCP on :{port}{MCP_PATH} ({len(_TOOLS)} tools, token required)", flush=True)
-    return server
+    controller = McpController(monitor, port)
+    controller.apply(bool(token), token)
+    return controller.server
+
+
+class McpController:
+    """Owns the optional MCP listener and can start/stop it at runtime.
+
+    The Settings tab flips `enabled` and the token while the dashboard keeps
+    running, so binding the port once at startup is not enough: apply() brings
+    the listener in line with the wish (start / stop / restart with a new
+    token) and never raises - a busy port is reported, not thrown.
+    """
+
+    def __init__(self, monitor, port: int = DEFAULT_PORT):
+        self.monitor = monitor
+        self.port = port
+        self._server: McpServer | None = None
+        self._token = ""
+        self.lock = threading.Lock()
+
+    @property
+    def server(self) -> McpServer | None:
+        return self._server
+
+    @property
+    def running(self) -> bool:
+        return self._server is not None
+
+    def status(self) -> dict:
+        return {"running": self.running, "port": self.port,
+                "tools": len(_TOOLS), "path": MCP_PATH, "error": ""}
+
+    def apply(self, enabled: bool, token: str) -> dict:
+        """Start, stop or restart so that (enabled, token) is in effect."""
+        token = (token or "").strip()
+        want = bool(enabled and token)
+        with self.lock:
+            if self._server is not None and (not want or token != self._token):
+                self._stop()
+            if want and self._server is None:
+                try:
+                    server = McpServer(("0.0.0.0", self.port), McpHandler)
+                except OSError as exc:
+                    return {**self.status(),
+                            "error": f"cannot bind port {self.port}: {exc}"}
+                server.monitor = self.monitor
+                server.mcp_token = token
+                threading.Thread(target=server.serve_forever, daemon=True).start()
+                self._server = server
+                self._token = token
+                print(f"[mcp] read-only MCP on :{self.port}{MCP_PATH} "
+                      f"({len(_TOOLS)} tools, token required)", flush=True)
+            elif self._server is None and not want:
+                reason = ("no token configured" if not token
+                          else "switched off in the settings")
+                print(f"[mcp] disabled - {reason}", flush=True)
+            return self.status()
+
+    def stop(self) -> dict:
+        with self.lock:
+            self._stop()
+        return self.status()
+
+    def _stop(self) -> None:
+        server, self._server, self._token = self._server, None, ""
+        if server is None:
+            return
+        try:
+            server.shutdown()
+            server.server_close()
+        except Exception:  # noqa: BLE001 - shutdown must never raise
+            pass
+        print("[mcp] listener stopped", flush=True)

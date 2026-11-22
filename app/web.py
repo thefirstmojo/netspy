@@ -34,8 +34,8 @@ from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from agent import Sampler, start_agent
-from mcp_server import DEFAULT_PORT as MCP_DEFAULT_PORT
-from mcp_server import start_mcp
+from mcp_server import McpController
+from settings_store import load_settings, resolve_mcp, settings_path, update_settings
 from shared import load_version
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -229,6 +229,8 @@ class Monitor:
         self.online: dict = {}
         self.errors: dict = {}
         self.sampler: Sampler | None = None
+        # Wird in main() gesetzt: startet/stoppt den MCP-Listener (Settings-Toggle)
+        self.mcp: "McpController | None" = None
 
         for s in servers:
             name = s["name"]
@@ -804,6 +806,22 @@ class WebHandler(BaseHTTPRequestHandler):
             except OSError:
                 pass
             # Herkunft pro Server: config-Zeilen zuerst, dann env (Dedupe)
+            # MCP: effektive Konfiguration (env gewinnt) + Laufzeitzustand
+            mcp_cfg = resolve_mcp(mon.config_dir, os.environ)
+            mcp_ctl = getattr(mon, "mcp", None)
+            mcp_state = mcp_ctl.status() if mcp_ctl is not None else {}
+            mcp_out = {
+                "enabled": mcp_cfg["enabled"],
+                "token": bool(mcp_cfg["token"]),          # Wert wird nie ausgeliefert
+                "token_source": mcp_cfg["token_source"],  # env | file | ""
+                "port": mcp_cfg["port"],
+                "running": bool(mcp_state.get("running")),
+                "tools": mcp_state.get("tools", 0),
+                "path": mcp_state.get("path", "/mcp"),
+                "error": mcp_state.get("error", ""),
+                "file": settings_path(mon.config_dir),
+                "writable": writable,
+            }
             cfg_names = {s["name"] for s in mon.config_servers}
             servers_out = (
                 [{"name": s["name"], "url": s.get("url"), "origin": "config"}
@@ -819,6 +837,7 @@ class WebHandler(BaseHTTPRequestHandler):
                 "diag": {"dev_root": dev_root, "dev_cfg": dev_cfg,
                          "mounted": dev_cfg is not None and dev_cfg != dev_root},
                 "servers": servers_out,
+                "mcp": mcp_out,
             }).encode()
             self._send_bytes(200, body, "application/json")
             return
@@ -844,6 +863,37 @@ class WebHandler(BaseHTTPRequestHandler):
                 self._send_bytes(200, body, ctype)
                 return
         self._send_bytes(404, b"not found", "text/plain")
+
+    def _apply_mcp(self, mon, req: dict) -> dict:
+        """MCP-Block in settings.yaml speichern und sofort anwenden.
+
+        Token-Semantik: fehlend/leer = bestehenden Token behalten,
+        token_clear=True = gespeicherten Token entfernen. Ein gesetzter
+        env-Token (MCP_TOKEN) gewinnt immer und wird nie ueberschrieben.
+        """
+        cur = load_settings(mon.config_dir).get("mcp")
+        cur = cur if isinstance(cur, dict) else {}
+        enabled = req.get("enabled")
+        block: dict = {"enabled": bool(enabled) if isinstance(enabled, bool)
+                       else bool(cur.get("enabled", True))}
+        if req.get("token_clear") is True:
+            block["token"] = ""
+        else:
+            tok = req.get("token")
+            block["token"] = (tok.strip() if isinstance(tok, str) and tok.strip()
+                              else str(cur.get("token") or ""))
+        path = update_settings(mon.config_dir, {"mcp": block})
+        cfg = resolve_mcp(mon.config_dir, os.environ)
+        ctl = getattr(mon, "mcp", None)
+        if ctl is None:
+            return {"mcp_file": path,
+                    "mcp": {"running": False, "port": cfg["port"],
+                            "enabled": cfg["enabled"], "error": "MCP controller unavailable",
+                            "token_source": cfg["token_source"]}}
+        state = ctl.apply(cfg["enabled"], cfg["token"])
+        return {"mcp_file": path,
+                "mcp": {**state, "enabled": cfg["enabled"],
+                        "token_source": cfg["token_source"]}}
 
     def do_POST(self):  # noqa: N802
         path = self.path.split("?")[0]
@@ -927,12 +977,21 @@ class WebHandler(BaseHTTPRequestHandler):
                 self._send_bytes(400, b'{"error":"invalid body"}', "application/json")
                 return
             servers = data.get("servers")
-            if not isinstance(servers, list):
+            mcp_req = data.get("mcp")
+            if servers is None and mcp_req is None:
+                self._send_bytes(400, b'{"error":"nothing to save (servers or mcp)"}',
+                                 "application/json")
+                return
+            if servers is not None and not isinstance(servers, list):
                 self._send_bytes(400, b'{"error":"servers must be a list"}',
                                  "application/json")
                 return
+            if mcp_req is not None and not isinstance(mcp_req, dict):
+                self._send_bytes(400, b'{"error":"mcp must be an object"}',
+                                 "application/json")
+                return
             cleaned = []
-            for s in servers:
+            for s in (servers or []):
                 if not isinstance(s, dict):
                     continue
                 name = str(s.get("name") or "").strip()
@@ -963,12 +1022,17 @@ class WebHandler(BaseHTTPRequestHandler):
                     "error": "config dir is not a mounted volume", "hint": hint
                 }).encode(), "application/json")
                 return
+            saved = {}
             try:
-                path = save_servers(cleaned, mon.config_dir)
-                # Env-Server bleiben unveraendert; die Datei enthaelt nur die
-                # uebermittelten (config-)Zeilen
-                mon.config_servers = cleaned
-                mon.set_servers(merge_servers(mon.env_servers, cleaned))
+                if servers is not None:
+                    path = save_servers(cleaned, mon.config_dir)
+                    # Env-Server bleiben unveraendert; die Datei enthaelt nur die
+                    # uebermittelten (config-)Zeilen
+                    mon.config_servers = cleaned
+                    mon.set_servers(merge_servers(mon.env_servers, cleaned))
+                    saved["path"] = path
+                if mcp_req is not None:
+                    saved.update(self._apply_mcp(mon, mcp_req))
             except OSError as e:
                 self._send_bytes(500, json.dumps({
                     "error": f"save failed: {e}",
@@ -980,7 +1044,7 @@ class WebHandler(BaseHTTPRequestHandler):
                     "error": f"apply failed: {e}",
                 }).encode(), "application/json")
                 return
-            self._send_bytes(200, json.dumps({"ok": True, "path": path}).encode(),
+            self._send_bytes(200, json.dumps({"ok": True, **saved}).encode(),
                              "application/json")
             return
         self._send_bytes(404, b"not found", "text/plain")
@@ -1387,14 +1451,13 @@ def main() -> None:
     # Volume) — sichtbarer Beweis auf dem Host, dass der Pfad korrekt ist.
     if init_config_template(config_dir):
         print(f"[config] Vorlage angelegt: {config_path(config_dir)}")
-    start_web(mon, port=int(os.environ.get("WEB_PORT", "8090")))
+    # MCP (nur lesend): Token aus MCP_TOKEN (env) oder settings.yaml,
+    # Toggle aus den Settings. apply() startet/stoppt auch zur Laufzeit.
+    mcp_cfg = resolve_mcp(config_dir, os.environ)
+    mon.mcp = McpController(mon, port=mcp_cfg["port"])
+    mon.mcp.apply(mcp_cfg["enabled"], mcp_cfg["token"])
 
-    # MCP (nur lesend) - startet ausschliesslich mit gesetztem MCP_TOKEN.
-    start_mcp(
-        mon,
-        port=int(os.environ.get("MCP_PORT", str(MCP_DEFAULT_PORT))),
-        token=os.environ.get("MCP_TOKEN", ""),
-    )
+    start_web(mon, port=int(os.environ.get("WEB_PORT", "8090")))
 
     # Web-Rolle stellt zusaetzlich eine Agent-API bereit, wenn lokal gesampelt wird
     if mon.sampler is not None:

@@ -1533,6 +1533,7 @@ async function loadSettings() {
   await loadTermState();   // Terminal-Ziele (für die Settings-Sektion)
   renderSettings();
   renderTermSettings();
+  renderMcpSettings();
 }
 
 function renderSettings() {
@@ -1672,6 +1673,100 @@ async function saveSettings() {
   } catch (e) {
     settingsStatus = "Network error.";
     status.textContent = settingsStatus;
+  }
+}
+
+/* ---------- MCP endpoint (read-only API: Toggle + Token) ---------- */
+let mcpStatus = "";
+let mcpClear = false;
+
+function renderMcpSettings() {
+  const box = document.getElementById("mcpbox");
+  if (!box) return;
+  if (!settingsData) {
+    box.innerHTML = `<p class="hint">MCP settings could not be loaded.</p>`;
+    return;
+  }
+  const m = settingsData.mcp || {};
+  const envLocked = m.token_source === "env";
+  const badge = envLocked
+    ? `<span class="srcbadge src-env" title="The token comes from the MCP_TOKEN environment variable and beats the file">⚙️ token: env (MCP_TOKEN)</span>`
+    : (m.token_source === "file"
+      ? `<span class="srcbadge src-file" title="The token is stored in settings.yaml">📄 token: settings.yaml</span>`
+      : `<span class="srcbadge src-env" title="No token configured yet">⚠️ no token</span>`);
+  const state = m.running
+    ? `<span class="mcp-state-on">● running</span> on port ${m.port} · ${m.tools || 0} read-only tools`
+    : (m.enabled
+      ? `<span class="mcp-state-warn">● enabled, not started</span> — a token is required`
+      : `<span class="mcp-state-off">● switched off</span> — the listener is not started`);
+  box.innerHTML =
+    badge +
+    (m.error ? `<div class="sett-warn"><b>Listener error:</b> ${esc(m.error)}</div>` : "") +
+    `<p class="hint">Status: ${state}<br>
+      Endpoint: <code>POST ${esc(m.path || "/mcp")}</code> on port ${m.port} ·
+      File: <code>${esc(m.file || "settings.yaml")}</code></p>
+     <div class="sett-row">
+       <label class="sett-check"><input type="checkbox" id="mcp-enabled" ${m.enabled ? "checked" : ""}> enabled</label>
+       <input id="mcp-token" type="password" autocomplete="new-password"
+              placeholder="${m.token ? "token set — empty = keep" : "token (required to start)"}"
+              ${envLocked ? "disabled" : ""}>
+       <button class="sett-del" id="mcp-clear" title="Remove the stored token"
+               ${envLocked ? "disabled" : ""}>✕</button>
+     </div>
+     <p class="hint">${envLocked
+        ? "The environment variable <code>MCP_TOKEN</code> wins — clear it in the container (or recreate without it) to manage the token here."
+        : "Leave the field empty to keep the current token. ✕ removes the stored token. The token is kept in <code>settings.yaml</code> next to <code>servers.yaml</code> (plain text like an env var, never sent back to the browser)."}</p>
+     <div class="sett-actions">
+       <button id="mcp-save" class="primary">💾 Save</button>
+       <span id="mcp-status" class="hint">${esc(mcpStatus)}</span>
+     </div>`;
+  box.querySelector("#mcp-clear").addEventListener("click", () => {
+    const field = document.getElementById("mcp-token");
+    field.value = "";
+    field.placeholder = "stored token will be removed";
+    mcpClear = true;
+    document.getElementById("mcp-status").textContent = "Token will be removed on save.";
+  });
+  box.querySelector("#mcp-save").addEventListener("click", saveMcpSettings);
+}
+
+async function saveMcpSettings() {
+  const status = document.getElementById("mcp-status");
+  const body = {
+    mcp: {
+      enabled: document.getElementById("mcp-enabled").checked,
+      token: document.getElementById("mcp-token").value.trim(),
+    },
+  };
+  if (mcpClear) body.mcp.token_clear = true;
+  status.textContent = "Saving…";
+  try {
+    const r = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) {
+      mcpClear = false;
+      const st = d.mcp || {};
+      mcpStatus = st.running
+        ? "✅ Saved — MCP running on port " + st.port
+        : ("✅ Saved — listener stopped" + (st.error ? " (" + st.error + ")" : ""));
+      settingsError = "";
+      loadSettings();
+    } else if (r.status === 409 && d.hint) {
+      mcpStatus = "";
+      settingsError = d.hint;
+      renderSettings();
+      renderMcpSettings();
+    } else {
+      mcpStatus = "Error: " + (d.error || r.status);
+      status.textContent = mcpStatus;
+    }
+  } catch (e) {
+    mcpStatus = "Network error.";
+    status.textContent = mcpStatus;
   }
 }
 
