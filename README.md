@@ -50,6 +50,26 @@ Real-time monitoring of your servers in one dashboard: **per-interface, per-proc
 - Each terminal listens on a host port (7681, 7682, …; host networking) and is embedded at `http://<host-ip>:<port>`
 - **⚠️ Security: private LAN only.** The login guards the dashboard's terminal tab; the ttyd ports themselves have no login of their own (embedded iframes can't show a Basic-Auth prompt) — so the actual protection of the servers is their **SSH authentication** (interactive password when no key is stored, keys only if you add them explicitly). Do **not** expose the dashboard or ports 7681+ outside your trusted network.
 
+### 🤖 MCP interface (read-only, optional, v0.7.46+)
+- AI assistants can query NetSpy directly: `POST /mcp` on port **8092**, JSON-RPC 2.0 over HTTP (Streamable HTTP, plain JSON answers)
+- **Off by default:** while `MCP_TOKEN` is empty the listener is not started at all. Set the variable in the container env and recreate — every request sends it as `X-MCP-Token` (or `Authorization: Bearer …`)
+- Eight **read-only** tools: `netspy_overview`, `netspy_agent_health`, `netspy_processes`, `netspy_peers`, `netspy_containers`, `netspy_interfaces`, `netspy_storage`, `netspy_history`
+- What they **cannot** do: change settings, start/stop containers, run commands, type into the SSH terminals. The module has no write path
+- Uptime check: `GET /mcp/health` (no token, no data — version and tool count only)
+- No new dependency: one stdlib module (`app/mcp_server.py`) inside the dashboard process, so no extra container and no extra memory
+- Example client config:
+```json
+{
+  "mcpServers": {
+    "netspy": {
+      "type": "http",
+      "url": "http://192.168.2.101:8092/mcp",
+      "headers": {"X-MCP-Token": "<your MCP_TOKEN>"}
+    }
+  }
+}
+```
+
 ![Disk I/O tab](docs/screenshots/disk-tab.png)
 
 > **⚠️ Requirements:** `network_mode: host` (the sampler needs the host's `/proc` and `ss`) and **root** (host PID namespace, `/proc/<pid>` reads, optional Docker socket — there is no non-root mode). Ports are set via `WEB_PORT`/`AGENT_PORT` — with host networking the value *is* the host port.
@@ -78,6 +98,8 @@ All values live directly in `docker-compose.yml` — no `.env` file.
 | `TZ` | `UTC` | Container timezone, e.g. `Europe/Berlin` (v0.7.35+, `tzdata` ships in the image). Decides when the storage history closes its day and month (local midnight instead of 02:00 with UTC) and the zone of all timestamps. Without `tzdata` the variable would be silently ignored — hence it is part of the image |
 | `WEB_PORT` / `AGENT_PORT` | `8090` / `8091` | Host ports (host networking — the values ARE the external ports) |
 | `AGENT_TOKEN` | empty | Shared `X-Agent-Token` header — **must match on all hosts** |
+| `MCP_TOKEN` | empty | **Optional read-only MCP interface** (v0.7.46+). The listener is not started while this is empty; requests send it as `X-MCP-Token` |
+| `MCP_PORT` | `8092` | Host port of the MCP endpoint (`POST /mcp`, host networking — the value IS the external port) |
 | `TTYD_USER` | empty | **Terminal tab login — username** (v0.7.12+). Container env var only — never stored in NetSpy, no settings-page option. Set both `TTYD_USER` + `TTYD_PASS` → the Terminal tab shows a login form and unlocks with these credentials |
 | `TTYD_PASS` | empty | **Terminal tab login — password** (v0.7.12+). Container env var only — never stored in NetSpy. Both empty (`TTYD_USER` + `TTYD_PASS`) → terminals stay disabled (tab shows a hint); the rest of the dashboard stays open |
 | `DOCKER_SOCK` | `/var/run/docker.sock` (web) | Docker socket for per-container rows; `""` disables |

@@ -23,6 +23,6 @@ WORKDIR /app
 COPY app/ /app/
 COPY VERSION /app/VERSION
 
-EXPOSE 8090 8091
+EXPOSE 8090 8091 8092
 
 CMD ["python", "run.py"]

@@ -10,6 +10,8 @@ Configuration (env):
   UPLINK      "br0"                (comma-separated, empty = auto)
   DOCKER_SOCK "/var/run/docker.sock"  (empty = disabled)
   AGENT_TOKEN ""                   (optional, shared token)
+  MCP_TOKEN   ""                   (optional; MCP listener starts only when set)
+  MCP_PORT    "8092"               (read-only MCP endpoint, POST /mcp)
   CONFIG_DIR  "/data"              (writable volume; servers.json lives here)
 
 Server list: if <CONFIG_DIR>/servers.json exists (and is valid) it wins.
@@ -32,6 +34,8 @@ from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from agent import Sampler, start_agent
+from mcp_server import DEFAULT_PORT as MCP_DEFAULT_PORT
+from mcp_server import start_mcp
 from shared import load_version
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -1384,6 +1388,13 @@ def main() -> None:
     if init_config_template(config_dir):
         print(f"[config] Vorlage angelegt: {config_path(config_dir)}")
     start_web(mon, port=int(os.environ.get("WEB_PORT", "8090")))
+
+    # MCP (nur lesend) - startet ausschliesslich mit gesetztem MCP_TOKEN.
+    start_mcp(
+        mon,
+        port=int(os.environ.get("MCP_PORT", str(MCP_DEFAULT_PORT))),
+        token=os.environ.get("MCP_TOKEN", ""),
+    )
 
     # Web-Rolle stellt zusaetzlich eine Agent-API bereit, wenn lokal gesampelt wird
     if mon.sampler is not None:
