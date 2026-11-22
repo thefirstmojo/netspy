@@ -1,5 +1,7 @@
 name: mirror-all-tags
 
+# GitHub is a MIRROR of the Forgejo repo. The canonical copy lives in
+# .forgejo/workflows/mirror-all-tags.yml; this one is a manual fallback.
 on:
   workflow_dispatch:
     inputs:

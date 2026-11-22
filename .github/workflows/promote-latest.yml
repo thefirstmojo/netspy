@@ -1,5 +1,7 @@
 name: promote-latest
 
+# GitHub is a MIRROR of the Forgejo repo. The canonical copy lives in
+# .forgejo/workflows/promote-latest.yml; this one is a manual fallback.
 on:
   workflow_dispatch:
     inputs:

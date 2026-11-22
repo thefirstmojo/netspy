@@ -1,8 +1,10 @@
 name: publish-image
 
+# GitHub is a MIRROR of the Forgejo repo (thefirstmojo/netspy @ 192.168.2.101:3010).
+# Builds run on the local Forgejo runner: .forgejo/workflows/publish-image.yml
+# (tag push -> build, same steps). This copy stays as a MANUAL fallback only,
+# so a mirror push does not trigger a second identical build.
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
 
 jobs:
