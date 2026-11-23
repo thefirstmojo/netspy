@@ -78,6 +78,44 @@ Real-time monitoring of your servers in one dashboard: **per-interface, per-proc
 
 ---
 
+## Logs — what `docker logs` tells you
+
+Both roles print one block at start-up, so the first look at the container log answers
+"is it up, where is it, and what is switched on?":
+
+```
+[netspy] NetSpy 0.7.48 - read-only network monitor  (pid 1)
+[netspy] dashboard : http://192.168.2.101:8090  - no auth, keep it on the private LAN
+[netspy] agent api : http://192.168.2.101:8091  ('local' sampler in SERVERS)
+[netspy] mcp       : on  -> http://192.168.2.101:8092/mcp  (8 read-only tools, token from env MCP_TOKEN)
+[netspy] config    : /netspy/config  (settings.yaml ok, servers.yaml ok, writable)
+[netspy] servers   : 2 -> Unraid=local, TrueNAS=http://192.168.2.100:8091
+[netspy] docker     : /var/run/docker.sock
+[netspy] ready - open http://192.168.2.101:8090
+```
+
+Those eight lines are derived from the live objects, not from a second guess at the
+environment: the addresses come from the interfaces (virtual ones such as `docker0`,
+`veth*`, `virbr*` are skipped, real bridges like Unraid's `br0` stay), and the MCP line
+reports exactly one of `on`, `off - no token configured`, `off - switched off in the
+Settings tab` or `ERROR - cannot bind port …`. The agent role prints its own shorter
+block (address, token required, uplink, docker socket).
+
+On top of that the MCP endpoint logs its own events, and only those:
+
+| line | meaning |
+|---|---|
+| `[mcp] listening on 0.0.0.0:8092/mcp - 8 read-only tools, token required` | listener started (start or toggle) |
+| `[mcp] first connection from 192.168.2.50:52104 - initialize - token accepted` | once per listener: the first request that got through |
+| `[mcp] netspy_overview: 408 bytes in 0 ms` | every tool call with size and duration |
+| `[mcp] rejected 192.168.2.50: missing or wrong token` | once per address, not per request — a scanner cannot flood the log |
+| `[mcp] listener stopped - port 8092 released` | switched off in the Settings tab |
+| `[mcp] ERROR cannot bind port 8092: [Errno 98] Address already in use` | port taken; the dashboard keeps running, the reason shows up in the Settings tab as well |
+
+Token values never appear in a log line. Requests with broken HTTP syntax and clients
+that vanish mid-request are answered or dropped silently instead of dumping a traceback
+into the log.
+
 ## Quick start
 
 | You want to… | Do this |

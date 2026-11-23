@@ -22,6 +22,7 @@ from __future__ import annotations
 import hmac
 import json
 import re
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -541,6 +542,39 @@ class McpServer(ThreadingHTTPServer):
     monitor: object
     mcp_token: str
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.started_at = time.time()
+        self.requests = 0
+        self.bad_tokens = set()
+        self._log_lock = threading.Lock()
+
+    def handle_error(self, request, client_address) -> None:
+        """A client that vanishes must not print a traceback into the log.
+
+        socketserver's default dumps the whole stack; for a log that people read
+        (`docker logs`), one line per odd client is enough.
+        """
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (BrokenPipeError, ConnectionResetError)):
+            return
+        ip = client_address[0] if isinstance(client_address, tuple) else client_address
+        print(f"[mcp] request error from {ip}: {type(exc).__name__}: {exc}", flush=True)
+
+    def note_request(self) -> int:
+        """Count the request and return its number (1 = the very first one)."""
+        with self._log_lock:
+            self.requests += 1
+            return self.requests
+
+    def note_bad_token(self, ip: str) -> bool:
+        """True the first time this address sends a wrong token (log once)."""
+        with self._log_lock:
+            if ip in self.bad_tokens:
+                return False
+            self.bad_tokens.add(ip)
+            return True
+
 
 class McpHandler(BaseHTTPRequestHandler):
     server_version = "NetSpyMCP/1.0"
@@ -619,7 +653,13 @@ class McpHandler(BaseHTTPRequestHandler):
         if path not in (MCP_PATH, "/"):
             self._json(404, {"error": "not found"})
             return
+        client_ip = self.client_address[0] if self.client_address else "-"
         if not self._authorized():
+            # Once per address: a LAN scanner or a stale client should not be
+            # able to fill the container log with 401 lines.
+            if self.server.note_bad_token(client_ip):
+                print(f"[mcp] rejected {client_ip}: missing or wrong token "
+                      f"(header X-MCP-Token)", flush=True)
             self._json(401, {"error": "missing or invalid MCP token (header X-MCP-Token)"})
             return
         try:
@@ -640,6 +680,11 @@ class McpHandler(BaseHTTPRequestHandler):
             self._json(400, {"jsonrpc": "2.0", "id": None,
                              "error": {"code": -32700, "message": f"parse error: {exc}"}})
             return
+        count = self.server.note_request()
+        if count == 1:
+            method = payload.get("method") if isinstance(payload, dict) else "batch"
+            print(f"[mcp] first connection from {client_ip}:{self.client_address[1]} "
+                  f"- {method} - token accepted", flush=True)
         body, status = handle_payload(self.server.monitor, payload)
         if body is None:
             self._send(status, None)
@@ -668,6 +713,7 @@ class McpController:
         self.port = port
         self._server: McpServer | None = None
         self._token = ""
+        self._error = ""
         self.lock = threading.Lock()
 
     @property
@@ -679,8 +725,8 @@ class McpController:
         return self._server is not None
 
     def status(self) -> dict:
-        return {"running": self.running, "port": self.port,
-                "tools": len(_TOOLS), "path": MCP_PATH, "error": ""}
+        return {"running": self.running, "port": self.port, "tools": len(_TOOLS),
+                "path": MCP_PATH, "error": self._error}
 
     def apply(self, enabled: bool, token: str) -> dict:
         """Start, stop or restart so that (enabled, token) is in effect."""
@@ -693,19 +739,24 @@ class McpController:
                 try:
                     server = McpServer(("0.0.0.0", self.port), McpHandler)
                 except OSError as exc:
-                    return {**self.status(),
-                            "error": f"cannot bind port {self.port}: {exc}"}
+                    # Port taken (another container, an old listener): keep the
+                    # dashboard alive, but say so - in the log and in the UI.
+                    self._error = f"cannot bind port {self.port}: {exc}"
+                    print(f"[mcp] ERROR {self._error}", flush=True)
+                    return self.status()
                 server.monitor = self.monitor
                 server.mcp_token = token
                 threading.Thread(target=server.serve_forever, daemon=True).start()
                 self._server = server
                 self._token = token
-                print(f"[mcp] read-only MCP on :{self.port}{MCP_PATH} "
-                      f"({len(_TOOLS)} tools, token required)", flush=True)
+                self._error = ""
+                print(f"[mcp] listening on 0.0.0.0:{self.port}{MCP_PATH} - "
+                      f"{len(_TOOLS)} read-only tools, token required", flush=True)
             elif self._server is None and not want:
-                reason = ("no token configured" if not token
-                          else "switched off in the settings")
-                print(f"[mcp] disabled - {reason}", flush=True)
+                reason = ("no token configured - set MCP_TOKEN or use the Settings tab"
+                          if not token else "switched off in the Settings tab")
+                self._error = ""
+                print(f"[mcp] off - {reason} (port {self.port} free)", flush=True)
             return self.status()
 
     def stop(self) -> dict:
@@ -722,4 +773,4 @@ class McpController:
             server.server_close()
         except Exception:  # noqa: BLE001 - shutdown must never raise
             pass
-        print("[mcp] listener stopped", flush=True)
+        print(f"[mcp] listener stopped - port {self.port} released", flush=True)

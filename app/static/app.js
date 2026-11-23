@@ -1696,9 +1696,11 @@ function renderMcpSettings() {
       : `<span class="srcbadge src-env" title="No token configured yet">⚠️ no token</span>`);
   const state = m.running
     ? `<span class="mcp-state-on">● running</span> on port ${m.port} · ${m.tools || 0} read-only tools`
-    : (m.enabled
-      ? `<span class="mcp-state-warn">● enabled, not started</span> — a token is required`
-      : `<span class="mcp-state-off">● switched off</span> — the listener is not started`);
+    : (m.error
+      ? `<span class="mcp-state-warn">● not running</span> — the port could not be bound`
+      : (m.enabled
+        ? `<span class="mcp-state-warn">● enabled, not started</span> — a token is required`
+        : `<span class="mcp-state-off">● switched off</span> — the listener is not started`));
   box.innerHTML =
     badge +
     (m.error ? `<div class="sett-warn"><b>Listener error:</b> ${esc(m.error)}</div>` : "") +

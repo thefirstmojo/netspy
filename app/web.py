@@ -36,7 +36,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from agent import Sampler, start_agent
 from mcp_server import McpController
 from settings_store import load_settings, resolve_mcp, settings_path, update_settings
-from shared import load_version
+from shared import load_version, local_ipv4
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 MIME = {
@@ -1422,6 +1422,56 @@ class TerminalManager:
         self.procs = {}
 
 
+def log_startup(monitor, servers, config_dir: str, web_port: int,
+                agent_port: int, mcp_cfg: dict, mcp_state: dict) -> None:
+    """One block in `docker logs` that says what runs, where and with what.
+
+    Docker logs are the first place to look when a container misbehaves, so the
+    effective start-up state is printed once: the addresses, whether the MCP
+    endpoint is on or off (and where its token came from), which config source
+    is in use and which servers are polled. All of it derived from the live
+    objects, not from a second guess at the environment.
+    """
+    ips = local_ipv4()
+    host = ips[0] if ips else "127.0.0.1"
+    more = f" (+ {', '.join(ips[1:])})" if len(ips) > 1 else ""
+    cfg_path = config_path(config_dir)
+    settings = settings_path(config_dir)
+    files = []
+    for label, path in (("settings.yaml", settings), ("servers.yaml", cfg_path)):
+        files.append(f"{label} {'ok' if os.path.exists(path) else 'missing'}")
+    writable = "writable" if config_writable(config_dir) else "READ-ONLY"
+    docker_sock = os.environ.get("DOCKER_SOCK", "/var/run/docker.sock") or "off"
+
+    port = mcp_cfg.get("port", 0)
+    source = mcp_cfg.get("token_source", "")
+    if mcp_state.get("running"):
+        mcp = (f"on  -> http://{host}:{port}/mcp  "
+               f"({mcp_state.get('tools', 0)} read-only tools, token from "
+               f"{'env MCP_TOKEN' if source == 'env' else 'settings.yaml'})")
+    elif mcp_state.get("error"):
+        mcp = f"ERROR - {mcp_state['error']}"
+    elif not mcp_cfg.get("token"):
+        mcp = f"off - no token configured (set MCP_TOKEN or use the Settings tab), port {port} free"
+    else:
+        mcp = f"off - switched off in the Settings tab, port {port} free"
+
+    agent = (f"http://{host}:{agent_port}  ('local' sampler in SERVERS)"
+             if monitor.sampler is not None
+             else "not started (no 'local' entry in SERVERS)")
+    listing = ", ".join(f"{s['name']}={s.get('url') or 'local'}" for s in servers) or "none"
+
+    print(f"[netspy] NetSpy {VERSION} - read-only network monitor  (pid {os.getpid()})", flush=True)
+    print(f"[netspy] dashboard : http://{host}:{web_port}{more}  "
+          f"- no auth, keep it on the private LAN", flush=True)
+    print(f"[netspy] agent api : {agent}", flush=True)
+    print(f"[netspy] mcp       : {mcp}", flush=True)
+    print(f"[netspy] config    : {config_dir}  ({', '.join(files)}, {writable})", flush=True)
+    print(f"[netspy] servers   : {len(servers)} -> {listing}", flush=True)
+    print(f"[netspy] docker     : {docker_sock}", flush=True)
+    print(f"[netspy] ready - open http://{host}:{web_port}", flush=True)
+
+
 def main() -> None:
     config_dir = resolve_config_dir(os.environ.get("CONFIG_DIR", ""))
     env_servers = parse_servers(os.environ.get("SERVERS", ""))
@@ -1450,22 +1500,22 @@ def main() -> None:
     # Beim Start: leere servers.yaml-Vorlage anlegen (nur bei gemountetem
     # Volume) — sichtbarer Beweis auf dem Host, dass der Pfad korrekt ist.
     if init_config_template(config_dir):
-        print(f"[config] Vorlage angelegt: {config_path(config_dir)}")
+        print(f"[config] created an empty template at {config_path(config_dir)}", flush=True)
     # MCP (nur lesend): Token aus MCP_TOKEN (env) oder settings.yaml,
     # Toggle aus den Settings. apply() startet/stoppt auch zur Laufzeit.
     mcp_cfg = resolve_mcp(config_dir, os.environ)
     mon.mcp = McpController(mon, port=mcp_cfg["port"])
-    mon.mcp.apply(mcp_cfg["enabled"], mcp_cfg["token"])
+    mcp_state = mon.mcp.apply(mcp_cfg["enabled"], mcp_cfg["token"])
 
-    start_web(mon, port=int(os.environ.get("WEB_PORT", "8090")))
+    web_port = int(os.environ.get("WEB_PORT", "8090"))
+    agent_port = int(os.environ.get("AGENT_PORT", "8091"))
+    start_web(mon, port=web_port)
 
     # Web-Rolle stellt zusaetzlich eine Agent-API bereit, wenn lokal gesampelt wird
     if mon.sampler is not None:
-        start_agent(mon.sampler, port=int(os.environ.get("AGENT_PORT", "8091")), token=token)
+        start_agent(mon.sampler, port=agent_port, token=token)
 
-    src = "file" if os.path.exists(config_path(config_dir)) else "env"
-    print(f"NetMon-Web auf :{os.environ.get('WEB_PORT', '8090')} "
-          f"-> Server: {[s['name'] for s in servers]} "
-          f"(Config-Quelle: {src}, Pfad: {config_path(config_dir)})")
+    log_startup(mon, servers, config_dir, web_port, agent_port,
+                mcp_cfg, mcp_state)
     while True:
         time.sleep(3600)

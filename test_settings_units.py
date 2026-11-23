@@ -9,7 +9,9 @@ Covers app/settings_store.py (settings.yaml) and McpController (app/mcp_server.p
   * enabled default: a token switches the listener on (composes from before
     v0.7.47 keep working untouched), an explicit mcp.enabled: false wins
   * settings.yaml: roundtrip, merge keeps other keys, broken file is ignored,
-    the file is written 0600 (it may carry the token)
+    the file is written 0666 (editable on the host, like servers.yaml)
+  * log output: the start-up block, the "first connection" line, a rejected
+    token (logged once per address, not per request)
   * runtime toggle: start / stop / restart with a new token; the old token is
     rejected afterwards and the port is free again after stop
 """
@@ -161,6 +163,104 @@ def test_controller() -> None:
     check("Port nach Stop geschlossen", port_open() is False)
     check("Status meldet stopped", ctl.status()["running"] is False)
 
+    # Belegter Port: kein Crash, Fehler landet in status() und im Log
+    blocker = socket.socket()
+    blocker.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    blocker.bind(("0.0.0.0", PORT))
+    blocker.listen(1)
+    import contextlib
+    import io
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            st = ctl.apply(True, "tok-c")
+    finally:
+        blocker.close()
+    check("belegter Port laesst die Anwendung weiterlaufen",
+          st["running"] is False and "cannot bind port" in st["error"])
+    check("Bind-Fehler wird geloggt", "[mcp] ERROR" in buf.getvalue()
+          and "cannot bind port" in buf.getvalue())
+    check("status() behaelt den Fehler", "cannot bind port" in ctl.status()["error"])
+
+    st = ctl.apply(True, "tok-d")
+    check("nach freiem Port startet er wieder und der Fehler ist weg",
+          st["running"] is True and st["error"] == "")
+    ctl.stop()
+
+
+def test_logging() -> None:
+    print("  Logmeldungen: Start, erste Verbindung, abgewiesener Token")
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        ctl = M.McpController(StubMonitor(), PORT)
+        ctl.apply(True, "")                      # kein Token
+        ctl.apply(False, "tok-a")                # Toggle aus
+        ctl.apply(True, "log-tok")               # an
+        time.sleep(0.2)
+        rpc(M.MCP_PATH, "log-tok", INIT)         # 1. Verbindung
+        rpc(M.MCP_PATH, "log-tok", INIT)         # 2. Anfrage, keine 2. Meldung
+        rpc(M.MCP_PATH, "falsch", INIT)          # 401
+        rpc(M.MCP_PATH, "falsch", INIT)          # 401, nicht doppelt
+        ctl.apply(False, "log-tok")              # stop
+    out = buf.getvalue()
+    check("Startmeldung nennt Bindung, Port und Toolzahl",
+          f"listening on 0.0.0.0:{PORT}/mcp" in out and "8 read-only tools" in out)
+    check("Aus-Meldung ohne Token",
+          "off - no token configured" in out and f"port {PORT} free" in out)
+    check("Aus-Meldung durch den Toggle",
+          "off - switched off in the Settings tab" in out)
+    check("erste Verbindung wird einmal gemeldet",
+          out.count("first connection from") == 1 and "token accepted" in out)
+    check("abgewiesener Token wird einmal pro Adresse gemeldet",
+          out.count("rejected 127.0.0.1") == 1)
+    check("Stop-Meldung nennt den freigegebenen Port",
+          f"listener stopped - port {PORT} released" in out)
+    check("kein Fehler bei sauberem Lauf", ctl.status()["error"] == "")
+    check("Token steht in keiner Logzeile", "log-tok" not in out)
+
+
+def test_startup_block(tmp: str) -> None:
+    print("  log_startup: ein Block mit Adresse, MCP-Status und Servern")
+    import contextlib
+    import io
+
+    import web as W
+
+    class Mon:
+        sampler = None
+
+    servers = [{"name": "Unraid", "url": "local"},
+               {"name": "TrueNAS", "url": "http://192.168.2.100:8091"}]
+
+    def run(cfg, state):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            W.log_startup(Mon(), servers, tmp, 18090, 18091, cfg, state)
+        return buf.getvalue()
+
+    on = run({"port": 18092, "token": "x", "token_source": "env", "enabled": True},
+             {"running": True, "tools": 8, "error": ""})
+    check("Kopfzeile mit Version", f"NetSpy {W.VERSION}" in on)
+    check("Dashboard-Adresse", ":18090" in on)
+    check("MCP an, Quelle env, Adresse", "on  -> http://" in on and "env MCP_TOKEN" in on
+          and ":18092/mcp" in on)
+    check("Serverliste mit beiden Eintraegen", "Unraid=local" in on and "TrueNAS=http://" in on)
+    check("lokaler Agent nicht gestartet", "not started" in on)
+    check("Config-Ordner und Rechte", tmp in on and ("writable" in on or "READ-ONLY" in on))
+    check("Token steht nicht im Startblock", "token from env MCP_TOKEN" in on and "'x'" not in on)
+
+    off = run({"port": 18092, "token": "", "token_source": "", "enabled": False},
+              {"running": False, "tools": 0, "error": ""})
+    check("MCP aus bei fehlendem Token", "off - no token configured" in off
+          and "port 18092 free" in off)
+
+    err = run({"port": 18092, "token": "x", "token_source": "file", "enabled": True},
+              {"running": False, "tools": 0, "error": "cannot bind port 18092"})
+    check("Bind-Fehler wird im Startblock gezeigt", "ERROR" in err and "cannot bind" in err)
+
 
 def main() -> int:
     print("NetSpy settings + MCP toggle tests")
@@ -168,6 +268,9 @@ def main() -> int:
         test_resolution(tmp)
         test_file(tmp)
     test_controller()
+    test_logging()
+    with tempfile.TemporaryDirectory() as tmp2:
+        test_startup_block(tmp2)
     ok = CHECKS[0] - len(FAILS)
     print(f"\n{ok}/{CHECKS[0]} checks passed")
     if FAILS:
